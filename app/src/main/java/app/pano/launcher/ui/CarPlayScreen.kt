@@ -85,13 +85,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.animation.core.snap
 import app.pano.launcher.RecentApps
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import app.pano.launcher.PanelHost
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalView
@@ -262,6 +266,7 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
             Row(Modifier.fillMaxSize().returnZoom().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 Rail(screen, onNavigate, Modifier.width(116.dp).fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                  Box(Modifier.weight(1f).fillMaxWidth()) {
                     // Ekranlar arası kısa fade + hafif dikey kayma.
                     AnimatedContent(
                         targetState = screen,
@@ -271,7 +276,7 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                                 .togetherWith(fadeOut(tween(MotionMs / 2)) + slideOutVertically(tween(MotionMs)) { -dir * it / 14 })
                         },
                         label = "ekran",
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        modifier = Modifier.fillMaxSize(),
                     ) { target ->
                         Box(Modifier.fillMaxSize()) {
                             when (target) {
@@ -282,6 +287,9 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                             }
                         }
                     }
+                    // Sağdan gelen uygulama paneli: harita ve uygulama çubuğu açık kalır.
+                    SheetHost(Modifier.fillMaxHeight().fillMaxWidth(0.64f).align(Alignment.CenterEnd))
+                  }
                     AnimatedVisibility(
                         visible = screen != Screen.Climate,
                         enter = fadeIn(tween(MotionMs)) + expandVertically(tween(MotionMs)),
@@ -450,6 +458,90 @@ private fun Dashboard(modifier: Modifier) {
 private val IslandHeight = 112.dp
 
 /**
+ * Sağdan kayarak gelen uygulama paneli ([AppSheet]). Başlıktan ya da sol kenardaki tutamaktan
+ * sağa sürükleyince birlikte kayar; yarıdan fazla çekilip bırakılırsa kapanır, azsa yerine döner.
+ * Araç hareket halindeyken içerik (video) kilitlenir.
+ */
+@Composable
+private fun SheetHost(modifier: Modifier) {
+    val c = glass()
+    val page = AppSheet.page
+    // Kapanış animasyonu bitene kadar içerik ekranda kalsın.
+    var shown by remember { mutableStateOf<AppSheet.Page?>(null) }
+    if (page != null) shown = page
+    // 1 = tamamen dışarıda (sağda), 0 = açık.
+    val hidden = remember { Animatable(1f) }
+    val scope = rememberCoroutineScope()
+    val driving by VehicleHub.isDriving.collectAsState()
+    var web by remember { mutableStateOf<android.webkit.WebView?>(null) }
+
+    LaunchedEffect(page) {
+        if (page != null) {
+            hidden.animateTo(0f, spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow))
+        } else {
+            hidden.animateTo(1f, tween(MotionMs))
+            shown = null
+        }
+    }
+
+    val p = shown ?: return
+    BoxWithConstraints(modifier) {
+        val widthPx = constraints.maxWidth.toFloat()
+        val shape = RoundedCornerShape(32.dp)
+
+        fun dragBy(dx: Float) = scope.launch { hidden.snapTo((hidden.value + dx / widthPx).coerceIn(0f, 1f)) }
+        fun settle() = scope.launch {
+            if (hidden.value > 0.3f) AppSheet.close()
+            else hidden.animateTo(0f, spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow))
+        }
+        val dragToClose = Modifier.pointerInput(Unit) {
+            detectHorizontalDragGestures(onDragEnd = { settle() }, onDragCancel = { settle() }) { change, dx ->
+                change.consume()
+                dragBy(dx)
+            }
+        }
+
+        Row(
+            Modifier.fillMaxSize()
+                .graphicsLayer { translationX = hidden.value * (widthPx + 40f) }
+                .shadow(28.dp, shape)
+                .clip(shape)
+                .background(if (c.dark) Color(0xFF111214) else Color(0xFFF4F5F7)),
+        ) {
+            // Sol kenar tutamağı: sürüklenince panel kayar.
+            Box(Modifier.width(28.dp).fillMaxHeight().then(dragToClose), contentAlignment = Alignment.Center) {
+                Box(Modifier.width(5.dp).height(64.dp).clip(RoundedCornerShape(3.dp)).background(c.secondary.copy(alpha = 0.5f)))
+            }
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                Row(
+                    Modifier.fillMaxWidth().height(64.dp).then(dragToClose).padding(end = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RoundIconButton(PanoIcons.ChevronLeft, "Geri", { web?.let { if (it.canGoBack()) it.goBack() } }, Color.Transparent, c.text, size = 56.dp, iconSize = 24.dp)
+                    Text(p.title, color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).padding(start = 6.dp))
+                    RoundIconButton(PanoIcons.Close, "Kapat", { AppSheet.close() }, c.chip, c.text, size = 52.dp, iconSize = 22.dp)
+                }
+                Box(Modifier.fillMaxSize().padding(start = 0.dp, end = 12.dp, bottom = 12.dp).clip(RoundedCornerShape(20.dp))) {
+                    if (driving) {
+                        // Sürüşte video ve web içeriği gösterilmez.
+                        Column(
+                            Modifier.fillMaxSize().background(c.chip),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Text("${p.title} sürüş sırasında kapalı", color = c.text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Araç durunca kendiliğinden açılır.", color = c.secondary, fontSize = 18.sp, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    } else {
+                        SheetWebView(p.url, Modifier.fillMaxSize()) { web = it }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Sürüş sırasında dikkat dağıtan ekranların (uygulama ızgarası, uzun ayar listeleri) yerine
  * büyük bir uyarı ve ana panoya dönüş düğmesi gösterir. Araç durunca içerik geri gelir.
  */
@@ -516,8 +608,12 @@ private fun FavoritesIsland(modifier: Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
+        // Panelde (sağdan gelen) açılan web uygulaması; her zaman başta durur.
+        SheetTile(AppSheet.YouTube, Color(0xFFFF0033))
+        if (favorites.isNotEmpty() || recents.isNotEmpty()) {
+            Box(Modifier.width(1.dp).height(44.dp).background(c.secondary.copy(alpha = 0.3f)))
+        }
         if (favorites.isEmpty() && recents.isEmpty()) {
-            Icon(PanoIcons.Star, contentDescription = null, tint = c.tertiary, modifier = Modifier.padding(start = 6.dp).size(20.dp))
             Text(
                 "Uygulamalar'da bir ikona uzun basarak favori ekle",
                 color = c.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
@@ -530,6 +626,20 @@ private fun FavoritesIsland(modifier: Modifier) {
             }
             recents.forEach { app -> key("r", app.packageName, app.className) { IslandApp(app, favorite = false) } }
         }
+    }
+}
+
+/** Sağdan gelen panelde açılan web uygulaması kutucuğu (uygulama simgesi boyutunda). */
+@Composable
+private fun SheetTile(page: AppSheet.Page, tint: Color) {
+    val open = AppSheet.page == page
+    Box(
+        Modifier.pressScale().size(64.dp).clip(RoundedCornerShape(23)).background(tint)
+            .clickable(role = Role.Button) { if (open) AppSheet.close() else AppSheet.open(page.title, page.url) }
+            .semantics { contentDescription = page.title },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(PanoIcons.Play, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
     }
 }
 
@@ -547,12 +657,7 @@ private fun IslandApp(app: app.pano.launcher.settings.FavoriteApp, favorite: Boo
                 .combinedClickable(
                     role = Role.Button,
                     onLongClick = { menu = true },
-                ) {
-                    // Destekleniyorsa launcher'dan çıkmadan harita panelinde açılır.
-                    if (!PanelHost.open(context, app.packageName, app.className)) {
-                        Launch.app(context, app.packageName, app.className, source.anchor())
-                    }
-                },
+                ) { Launch.app(context, app.packageName, app.className, source.anchor()) },
         )
         if (menu) {
             androidx.compose.ui.window.Popup(
@@ -567,10 +672,6 @@ private fun IslandApp(app: app.pano.launcher.settings.FavoriteApp, favorite: Boo
                 ) {
                     Text(app.label, color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
-                    IslandMenuItem("Tam ekran aç") {
-                        menu = false
-                        Launch.app(context, app.packageName, app.className, source.anchor())
-                    }
                     IslandMenuItem(if (favorite) "Favorilerden çıkar" else "Favorilere ekle") {
                         menu = false
                         val r = FavoritesStore.toggle(app)
@@ -605,17 +706,8 @@ private fun MapWidget(modifier: Modifier) {
     }
     val shape = RoundedCornerShape(32.dp)
     val clearance = 14.dp
-    val view = LocalView.current
 
-    // Panelde açılan uygulamalar tam bu kartın ekrandaki yerine oturur.
-    Box(modifier.onGloballyPositioned { coords ->
-        val r = coords.boundsInWindow()
-        val loc = IntArray(2).also { view.rootView.getLocationOnScreen(it) }
-        val dy = loc[1]
-        PanelHost.bounds = android.graphics.Rect(
-            r.left.toInt() + loc[0], r.top.toInt() + dy, r.right.toInt() + loc[0], r.bottom.toInt() + dy,
-        )
-    }.clip(shape).background(if (c.dark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
+    Box(modifier.clip(shape).background(if (c.dark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
         LiveMap(Modifier.fillMaxSize(), dark = c.dark, showLocation = granted, bottomInset = 0f)
         // Navigasyon uygulaması dokunulan yerden (harita, manevra kartı ya da arama çubuğu) büyüyerek açılır.
         val mapSrc = rememberLaunchSource()
