@@ -34,6 +34,8 @@ enum class LayoutStyle(val label: String) { Pano("Klasik"), CarPlay("CarPlay") }
 
 data class StyleSettings(
     val developerMode: Boolean = false,
+    /** Araç ekranında WhatsApp / SMS mesajları için kısa banner. */
+    val showMessages: Boolean = true,
     val layout: LayoutStyle = LayoutStyle.Pano,
     val theme: ThemeMode = ThemeMode.Auto,
     val dock: DockStyle = DockStyle.Mono,
@@ -61,6 +63,7 @@ object Settings {
         val d = StyleSettings()
         _state.value = StyleSettings(
             developerMode = p.getBoolean("developerMode", d.developerMode),
+            showMessages = p.getBoolean("showMessages", d.showMessages),
             layout = enumOr(p.getString("layout", null), d.layout),
             theme = enumOr(p.getString("theme", null), d.theme),
             dock = enumOr(p.getString("dock", null), d.dock),
@@ -75,6 +78,7 @@ object Settings {
         _state.value = s
         prefs?.edit()
             ?.putBoolean("developerMode", s.developerMode)
+            ?.putBoolean("showMessages", s.showMessages)
             ?.putString("layout", s.layout.name)
             ?.putString("theme", s.theme.name)
             ?.putString("dock", s.dock.name)
@@ -84,8 +88,8 @@ object Settings {
             ?.apply()
     }
 
-    /** Geliştirici modu açık kalır, sadece stiller sıfırlanır. */
-    fun resetStyles() = update { StyleSettings(developerMode = it.developerMode) }
+    /** Geliştirici modu ve mesaj ayarı korunur, sadece stiller sıfırlanır. */
+    fun resetStyles() = update { StyleSettings(developerMode = it.developerMode, showMessages = it.showMessages) }
 
     private inline fun <reified T : Enum<T>> enumOr(name: String?, fallback: T): T =
         name?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback

@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import app.pano.launcher.messages.MessageHub
 import app.pano.launcher.navigation.NavHub
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +20,8 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Bildirim dinleyicisi. Varlığı, Android'in medya oturumlarını okumamıza izin verir
- * ([MediaHub]); ayrıca navigasyon uygulamalarının bildirimlerini [NavHub]'a aktarır.
+ * ([MediaHub]); ayrıca navigasyon uygulamalarının bildirimlerini [NavHub]'a,
+ * WhatsApp / SMS bildirimlerini [MessageHub]'a aktarır.
  */
 class MediaListenerService : NotificationListenerService() {
 
@@ -37,14 +39,19 @@ class MediaListenerService : NotificationListenerService() {
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         NavHub.clear()
+        MessageHub.clear()
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        if (sbn != null && NavHub.isNavPackage(sbn.packageName)) NavHub.onPosted(this, sbn)
+        if (sbn == null) return
+        if (NavHub.isNavPackage(sbn.packageName)) NavHub.onPosted(this, sbn)
+        // Bağlanırken eski mesajlar alınmaz; yalnızca yeni gelenler banner olur.
+        else MessageHub.onPosted(this, sbn)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        if (sbn != null && NavHub.isNavPackage(sbn.packageName)) NavHub.onRemoved(sbn)
+        if (sbn == null) return
+        if (NavHub.isNavPackage(sbn.packageName)) NavHub.onRemoved(sbn) else MessageHub.onRemoved(sbn)
     }
 }
 
