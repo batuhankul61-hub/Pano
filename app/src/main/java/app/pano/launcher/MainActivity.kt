@@ -46,10 +46,31 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Settings.load(this)
         setContent {
-            PanoTheme(Settings.state.value) {
+            val style = Settings.state.value
+            // Ayar açıksa aracın alt sistem çubuğu gizlenir; alttan kaydırınca kısa süre görünür.
+            androidx.compose.runtime.LaunchedEffect(style.hideSystemBar) { applySystemBar(style.hideSystemBar) }
+            PanoTheme(style) {
                 PanoApp(screen.value) { screen.value = it }
             }
         }
+    }
+
+    private fun applySystemBar(hide: Boolean) {
+        val controller = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+        val bars = androidx.core.view.WindowInsetsCompat.Type.navigationBars()
+        if (hide) {
+            controller.systemBarsBehavior =
+                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(bars)
+        } else {
+            controller.show(bars)
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Başka uygulamadan dönünce sistem çubuğu yeniden görünebiliyor; ayar yeniden uygulanır.
+        if (hasFocus && Settings.state.value.hideSystemBar) applySystemBar(true)
     }
 
     /** Ana ekran tuşuna basılınca her zaman ana sayfaya dön. */

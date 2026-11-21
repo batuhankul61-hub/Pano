@@ -81,6 +81,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                         "WhatsApp ve SMS mesajları ekranın üstünde kısa süre görünür",
                         style.showMessages,
                     ) { on -> Settings.update { it.copy(showMessages = on) } }
+                    Divider()
+                    SwitchRowSetting(
+                        "Alt sistem çubuğunu gizle",
+                        "Pano tam ekran olur; çubuğu görmek için ekranın altından yukarı kaydır",
+                        style.hideSystemBar,
+                    ) { on -> Settings.update { it.copy(hideSystemBar = on) } }
                 }
 
                 Group("Geliştirici") {
