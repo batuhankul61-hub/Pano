@@ -194,4 +194,10 @@ object MediaHub {
 
     fun next() = controller?.transportControls?.skipToNext()
     fun previous() = controller?.transportControls?.skipToPrevious()
+
+    /** Uygulama sarmayı destekliyorsa true; ilerleme çubuğu ancak o zaman sürüklenebilir. */
+    fun canSeek(): Boolean =
+        (controller?.playbackState?.actions ?: 0L) and PlaybackState.ACTION_SEEK_TO != 0L
+
+    fun seekTo(positionMs: Long) = controller?.transportControls?.seekTo(positionMs)
 }

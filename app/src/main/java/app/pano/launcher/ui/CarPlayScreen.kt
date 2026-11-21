@@ -487,6 +487,7 @@ private val IslandHeight = 112.dp
 private sealed interface RightContent {
     data class Web(val page: AppSheet.Page) : RightContent
     data class Native(val screen: Screen) : RightContent
+    data object Music : RightContent
 }
 
 /**
@@ -504,11 +505,13 @@ private fun RightScreenHost(screen: Screen, onNavigate: (Screen) -> Unit, modifi
 
     // Aynı anda tek içerik: yerel ekran seçilince web kapanır, web açılınca yerel ekran kapanır.
     LaunchedEffect(screen) { if (native) AppSheet.close() }
-    LaunchedEffect(page) { if (page != null && native) onNavigate(Screen.Home) }
+    val music = AppSheet.music
+    LaunchedEffect(page, music) { if ((page != null || music) && native) onNavigate(Screen.Home) }
 
     val target: RightContent? = when {
         native -> RightContent.Native(screen)
         page != null -> RightContent.Web(page)
+        music -> RightContent.Music
         else -> null
     }
     fun close() = if (native) onNavigate(Screen.Home) else AppSheet.close()
@@ -566,6 +569,16 @@ private fun RightScreenHost(screen: Screen, onNavigate: (Screen) -> Unit, modifi
                         Screen.Apps -> DrivingGate("Uygulamalar", { onNavigate(Screen.Home) }) { AppsScreen { onNavigate(Screen.Home) } }
                         else -> DrivingGate("Ayarlar", { onNavigate(Screen.Home) }) { SettingsScreen { onNavigate(Screen.Home) } }
                     }
+                }
+                RightContent.Music -> Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier.fillMaxWidth().height(68.dp).then(dragToClose).padding(start = 28.dp, end = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Şimdi çalıyor", color = c.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        RoundIconButton(PanoIcons.Close, "Kapat", { close() }, Color.Transparent, c.secondary, size = 56.dp, iconSize = 22.dp)
+                    }
+                    NowPlayingScreen(Modifier.fillMaxSize().padding(start = 36.dp, end = 36.dp, bottom = 32.dp))
                 }
                 is RightContent.Web -> Column(Modifier.fillMaxSize()) {
                     val p = content.page
@@ -1118,7 +1131,12 @@ private fun NowPlayingWidget(modifier: Modifier) {
     val driving by VehicleHub.isDriving.collectAsState()
     val p = playing
 
-    Column(modifier.glass(c).padding(24.dp)) {
+    // Kartın boş yerine dokununca sağ ekranda büyük "Şimdi çalıyor" açılır; kapak ve düğmeler kendi işini yapar.
+    Column(
+        modifier.glass(c)
+            .clickable(role = Role.Button, onClickLabel = "Şimdi çalıyor ekranını aç") { AppSheet.openMusic() }
+            .padding(24.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val artSrc = rememberLaunchSource()
             Box(
@@ -1180,6 +1198,130 @@ private fun NowPlayingWidget(modifier: Modifier) {
                     { MediaHub.playPause() }, c.chip, c.text, size = 64.dp, iconSize = 30.dp,
                 )
                 RoundIconButton(PanoIcons.Next, "Sonraki", { MediaHub.next() }, Color.Transparent, c.text, size = 56.dp, iconSize = 28.dp)
+            }
+        }
+    }
+}
+
+/** "3:07" biçiminde süre. */
+private fun duration(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(0)
+    return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+}
+
+/**
+ * Sağ ekrandaki büyük müzik ekranı: solda kapak, sağda başlık / sanatçı / kaynak uygulama,
+ * ilerleme çubuğu (uygulama destekliyorsa sürüklenebilir) ve büyük kontroller.
+ * Kapağa dokununca kaynak uygulama tam ekran açılır.
+ */
+@Composable
+private fun NowPlayingScreen(modifier: Modifier) {
+    val c = glass()
+    val context = LocalContext.current
+    val playing by MediaHub.state.collectAsState()
+    val now by rememberClock()
+    val p = playing
+    val appName = remember(p?.packageName) {
+        p?.packageName?.let { pkg ->
+            runCatching { context.packageManager.run { getApplicationLabel(getApplicationInfo(pkg, 0)).toString() } }.getOrNull()
+        }
+    }
+
+    BoxWithConstraints(modifier) {
+        val art = minOf(maxHeight, maxWidth * 0.46f)
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            val artSrc = rememberLaunchSource()
+            Box(
+                Modifier.pressScale(0.97f).size(art).launchSource(artSrc).shadow(24.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFFFF6482), Color(0xFFBF5AF2))))
+                    .clickable(role = Role.Button, onClickLabel = "Müzik uygulamasını aç") { Launch.music(context, p?.packageName, artSrc.anchor()) },
+                contentAlignment = Alignment.Center,
+            ) {
+                val bmp = p?.art
+                if (bmp != null) {
+                    Image(bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                } else {
+                    Icon(PanoIcons.Music, contentDescription = null, tint = Color.White, modifier = Modifier.size(art * 0.3f))
+                }
+            }
+
+            Column(Modifier.weight(1f).padding(start = 40.dp)) {
+                Text(
+                    (appName ?: if (p?.isPlaying == true) "ŞİMDİ ÇALIYOR" else "MÜZİK").uppercase(tr),
+                    color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp, maxLines = 1,
+                )
+                Text(
+                    p?.title ?: "Müzik çalmıyor", color = c.text, fontSize = 38.sp, fontWeight = FontWeight.Bold, lineHeight = 44.sp,
+                    letterSpacing = (-0.6).sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp),
+                )
+                Text(
+                    p?.artist?.ifBlank { null } ?: if (p == null) "Kapağa dokunup müzik uygulamasını aç" else "",
+                    color = c.secondary, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+
+                if (p != null) {
+                    val position = now.let {
+                        if (p.isPlaying && p.positionUpdatedAt > 0) {
+                            p.positionMs + ((SystemClock.elapsedRealtime() - p.positionUpdatedAt) * p.speed).toLong()
+                        } else p.positionMs
+                    }.coerceIn(0L, if (p.durationMs > 0) p.durationMs else Long.MAX_VALUE)
+                    // Sürüklerken çubuk parmağı izler; bırakınca tek seek komutu gider.
+                    var dragFraction by remember { mutableStateOf<Float?>(null) }
+                    val seekable = p.durationMs > 0 && MediaHub.canSeek()
+                    val progress = dragFraction ?: if (p.durationMs > 0) position.toFloat() / p.durationMs else 0f
+                    Box(
+                        Modifier.padding(top = 36.dp).fillMaxWidth().height(40.dp)
+                            .then(
+                                if (seekable) Modifier.pointerInput(p.durationMs) {
+                                    fun at(x: Float) = (x / size.width).coerceIn(0f, 1f)
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown()
+                                        dragFraction = at(down.position.x)
+                                        while (true) {
+                                            val ev = awaitPointerEvent()
+                                            val ch = ev.changes.firstOrNull() ?: break
+                                            if (!ch.pressed) break
+                                            ch.consume()
+                                            dragFraction = at(ch.position.x)
+                                        }
+                                        dragFraction?.let { MediaHub.seekTo((it * p.durationMs).toLong()) }
+                                        dragFraction = null
+                                    }
+                                } else Modifier,
+                            ),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        val h by animateDpAsState(if (dragFraction != null) 12.dp else 7.dp, tween(MotionMs / 2), label = "ilerleme-kalınlık")
+                        Box(Modifier.fillMaxWidth().height(h).clip(RoundedCornerShape(6.dp)).background(c.chip)) {
+                            Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).clip(RoundedCornerShape(6.dp)).background(c.text))
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth()) {
+                        val shownPos = dragFraction?.let { (it * p.durationMs).toLong() } ?: position
+                        Text(duration(shownPos), color = c.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        if (p.durationMs > 0) {
+                            Text("-" + duration(p.durationMs - shownPos), color = c.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 28.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val enabled = p != null
+                    val tint = if (enabled) c.text else c.tertiary
+                    RoundIconButton(PanoIcons.Previous, "Önceki", { MediaHub.previous() }, Color.Transparent, tint, size = 88.dp, iconSize = 40.dp)
+                    RoundIconButton(
+                        if (p?.isPlaying == true) PanoIcons.Pause else PanoIcons.Play,
+                        if (p?.isPlaying == true) "Duraklat" else "Oynat",
+                        { if (enabled) MediaHub.playPause() else Launch.music(context, null) },
+                        c.chip, c.text, size = 108.dp, iconSize = 46.dp,
+                    )
+                    RoundIconButton(PanoIcons.Next, "Sonraki", { MediaHub.next() }, Color.Transparent, tint, size = 88.dp, iconSize = 40.dp)
+                }
             }
         }
     }

@@ -22,12 +22,23 @@ object AppSheet {
     var page by mutableStateOf<Page?>(null)
         private set
 
+    /** Sağ ekranda Pano'nun kendi "Şimdi çalıyor" ekranı açık mı. Web sayfasıyla aynı anda açılmaz. */
+    var music by mutableStateOf(false)
+        private set
+
     fun open(title: String, url: String) {
+        music = false
         page = Page(title, url)
+    }
+
+    fun openMusic() {
+        page = null
+        music = true
     }
 
     fun close() {
         page = null
+        music = false
     }
 
     /** Panelde açılabilen web uygulamaları (adada sabit durur). */
