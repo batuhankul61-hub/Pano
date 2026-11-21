@@ -41,7 +41,7 @@ import app.pano.launcher.ui.theme.Accent
 import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.ui.theme.linkColor
 import app.pano.launcher.vehicle.ClimateState
-import app.pano.launcher.vehicle.VehicleSource
+import app.pano.launcher.vehicle.VehicleHub
 import app.pano.launcher.vehicle.decimal
 import app.pano.launcher.vehicle.shortTemp
 import kotlinx.coroutines.delay
@@ -80,7 +80,7 @@ private fun TopBar() {
     val colors = LocalPano.current
     val now by rememberNow()
     val tr = Locale.forLanguageTag("tr-TR")
-    val vehicle = VehicleSource.current()
+    val vehicle by VehicleHub.state.collectAsState()
     Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
             SimpleDateFormat("HH:mm", tr).format(Date(now)),
@@ -92,9 +92,9 @@ private fun TopBar() {
             modifier = Modifier.padding(start = 16.dp, top = 4.dp),
         )
         Box(Modifier.weight(1f))
-        BatteryGlyph(vehicle.batteryPercent)
+        BatteryGlyph(vehicle.batteryPercent ?: 0)
         Text(
-            "${vehicle.batteryPercent}%", color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            vehicle.batteryPercent?.let { "$it%" } ?: "—", color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 10.dp),
         )
     }
@@ -117,18 +117,25 @@ private fun BatteryGlyph(percent: Int) {
 private fun VehicleCard(modifier: Modifier) {
     val colors = LocalPano.current
     val context = LocalContext.current
-    val vehicle = VehicleSource.current()
+    val vehicle by VehicleHub.state.collectAsState()
+    val locked = vehicle.locked
+    // Vites biliniyorsa o; önizlemede eski "Park" metni (etiket zaten "Önizleme").
+    val gearLabel = vehicle.gear?.label ?: if (vehicle.isPreview) "Park" else null
+    val status = listOfNotNull(
+        gearLabel,
+        locked?.let { if (it) "Kilitli" else "Kilit açık" },
+    ).joinToString(" · ").ifEmpty { "—" }
     PanoCard(modifier, padding = 36.dp) {
         Row(Modifier.fillMaxWidth()) {
             Column(Modifier.weight(1f)) {
                 Text(vehicle.name, color = colors.text, fontSize = 44.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1.6).sp)
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                     Icon(
-                        if (vehicle.locked) PanoIcons.Lock else PanoIcons.Unlock, contentDescription = null,
+                        if (locked == false) PanoIcons.Unlock else PanoIcons.Lock, contentDescription = null,
                         tint = colors.secondary, modifier = Modifier.size(18.dp),
                     )
                     Text(
-                        if (vehicle.locked) "Park · Kilitli" else "Park · Kilit açık",
+                        status,
                         color = colors.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(start = 8.dp),
                     )
@@ -144,13 +151,13 @@ private fun VehicleCard(modifier: Modifier) {
             }
             Column(horizontalAlignment = Alignment.End) {
                 Row(verticalAlignment = Alignment.Bottom) {
-                    BigNumber("${vehicle.rangeKm}", size = 64.sp, weight = FontWeight.Light)
+                    BigNumber(vehicle.rangeKm?.toString() ?: "—", size = 64.sp, weight = FontWeight.Light)
                     Text("km", color = colors.secondary, fontSize = 24.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp, bottom = 9.dp))
                 }
                 Box(Modifier.padding(top = 12.dp).width(200.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(colors.raised)) {
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(vehicle.batteryPercent / 100f).clip(RoundedCornerShape(3.dp)).background(Accent.Green))
+                    Box(Modifier.fillMaxHeight().fillMaxWidth((vehicle.batteryPercent ?: 0) / 100f).clip(RoundedCornerShape(3.dp)).background(Accent.Green))
                 }
-                Text("%${vehicle.batteryPercent} batarya", color = colors.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 10.dp))
+                Text(vehicle.batteryPercent?.let { "%$it batarya" } ?: "Batarya bilinmiyor", color = colors.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 10.dp))
             }
         }
 
@@ -161,7 +168,7 @@ private fun VehicleCard(modifier: Modifier) {
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             val notYet = { Launch.notConnectedYet(context) }
-            VehicleAction(if (vehicle.locked) PanoIcons.Unlock else PanoIcons.Lock, if (vehicle.locked) "Kilidi aç" else "Kilitle", notYet)
+            VehicleAction(if (locked == false) PanoIcons.Lock else PanoIcons.Unlock, if (locked == false) "Kilitle" else "Kilidi aç", notYet)
             VehicleAction(PanoIcons.Trunk, "Bagaj", notYet)
             VehicleAction(PanoIcons.Bolt, "Şarj portu", notYet)
             VehicleAction(PanoIcons.Mirror, "Aynalar", notYet)
@@ -248,11 +255,11 @@ private fun ClimateMini(climate: ClimateState, onOpen: () -> Unit, modifier: Mod
 @Composable
 private fun ConsumptionMini(modifier: Modifier) {
     val colors = LocalPano.current
-    val vehicle = VehicleSource.current()
+    val vehicle by VehicleHub.state.collectAsState()
     PanoCard(modifier, padding = 22.dp) {
         CardLabel(PanoIcons.Bolt, "Tüketim")
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-            BigNumber(decimal(vehicle.consumptionKwh100), size = 52.sp, weight = FontWeight.Light)
+            BigNumber(vehicle.consumptionKwh100?.let(::decimal) ?: "—", size = 52.sp, weight = FontWeight.Light)
         }
         Text("kWh / 100 km", color = colors.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
