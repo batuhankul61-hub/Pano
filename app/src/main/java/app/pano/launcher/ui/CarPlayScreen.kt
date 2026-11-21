@@ -297,7 +297,11 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                         enter = fadeIn(tween(MotionMs)) + expandVertically(tween(MotionMs)),
                         exit = fadeOut(tween(MotionMs / 2)) + shrinkVertically(tween(MotionMs)),
                     ) {
-                        ClimateStrip(climate, { onNavigate(Screen.Climate) }, Modifier.fillMaxWidth().height(92.dp))
+                        ClimateStrip(
+                            climate, { onNavigate(Screen.Climate) },
+                            onHome = { AppSheet.close(); onNavigate(Screen.Home) },
+                            Modifier.fillMaxWidth().height(92.dp),
+                        )
                     }
                 }
             }
@@ -1105,14 +1109,28 @@ private fun ConsumptionWidget(modifier: Modifier) {
 // ───────────────────────── Alt klima şeridi ─────────────────────────
 
 @Composable
-private fun ClimateStrip(climate: ClimateState, onOpen: () -> Unit, modifier: Modifier) {
+private fun ClimateStrip(climate: ClimateState, onOpen: () -> Unit, onHome: () -> Unit, modifier: Modifier) {
     val c = glass()
-    Row(modifier.glass(c, RoundedCornerShape(30.dp)).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        // Tek bölgeli klimada tek, geniş bir sürgü; çift bölgede sürücü ve yolcu ayrı.
+    val context = LocalContext.current
+    // Aracın alt sistem çubuğunun yerini tutar: ev, sıcaklık, klima, fan, araç ayarları.
+    // "Alt sistem çubuğunu gizle" açıkken launcher'dan çıkmadan her şey buradan yönetilir.
+    Row(
+        modifier.glass(c, RoundedCornerShape(30.dp)).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.Home, "Ana pano", onHome, c.chip, c.text, size = 58.dp, iconSize = 24.dp) }
+        // Tek bölgeli klimada tek, geniş bir sürgü (yanında ‹ › ile derece derece); çift bölgede sürücü ve yolcu ayrı.
+        if (!climate.dualZone) {
+            Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronLeft, "Sıcaklığı düşür", { climate.changeDriver(-1f) }, Color.Transparent, c.text, size = 58.dp, iconSize = 22.dp) }
+        }
         TempSlider(
             climate.driver, climate, if (climate.dualZone) "Sürücü" else "Sıcaklık",
-            Modifier.width(if (climate.dualZone) 300.dp else 420.dp),
+            Modifier.width(if (climate.dualZone) 300.dp else 360.dp),
         ) { climate.setDriverTemp(it) }
+        if (!climate.dualZone) {
+            Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronRight, "Sıcaklığı artır", { climate.changeDriver(1f) }, Color.Transparent, c.text, size = 58.dp, iconSize = 22.dp) }
+        }
         Row(
             Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
@@ -1138,6 +1156,7 @@ private fun ClimateStrip(climate: ClimateState, onOpen: () -> Unit, modifier: Mo
         if (climate.dualZone) {
             TempSlider(climate.passenger, climate, "Yolcu", Modifier.width(300.dp)) { climate.setPassengerTemp(it) }
         }
+        Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.Car, "Araç ayarları", { Launch.carSettings(context) }, c.chip, c.text, size = 58.dp, iconSize = 26.dp) }
     }
 }
 

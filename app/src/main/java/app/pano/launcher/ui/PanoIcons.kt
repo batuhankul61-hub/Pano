@@ -31,6 +31,15 @@ object PanoIcons {
             fill = SolidColor(Color.Black),
         ).build()
 
+    val Home = line("home", "M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z")
+
+    /** Yandan araç: araç ayarları. */
+    val Car = line(
+        "car",
+        "M4 16v-3l1.8-4.2A2 2 0 0 1 7.6 7.6h8.8a2 2 0 0 1 1.8 1.2L20 13v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" +
+            "M4.5 13h15M7.5 17v1.5M16.5 17v1.5",
+    )
+
     val Apps = line(
         "apps",
         "M6 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" +

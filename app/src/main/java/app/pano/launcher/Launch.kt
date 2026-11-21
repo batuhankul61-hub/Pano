@@ -94,6 +94,14 @@ object Launch {
 
     fun settings(context: Context) = start(context, Intent(Settings.ACTION_SETTINGS), "Ayarlar açılamadı")
 
+    /** Aracın kendi ayarları (BYD'de alt çubuktaki dişli); yoksa Android ayarları. */
+    private val CAR_SETTINGS_APPS = listOf("com.byd.carsettings")
+
+    fun carSettings(context: Context) {
+        val launch = launchable(context, CAR_SETTINGS_APPS)
+        if (launch != null) start(context, launch, "Araç ayarları açılamadı") else settings(context)
+    }
+
     fun notificationAccess(context: Context) =
         start(context, Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS), "Ayar ekranı açılamadı")
 
