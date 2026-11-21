@@ -85,6 +85,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
+import app.pano.launcher.PanelHost
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalView
 import app.pano.launcher.LaunchAnchor
 import app.pano.launcher.settings.FavoritesStore
 import app.pano.launcher.Screen
@@ -514,7 +518,12 @@ private fun FavoritesIsland(modifier: Modifier) {
                     AppIcon(
                         app.packageName, app.className, 64.dp,
                         Modifier.pressScale().launchSource(source).clip(RoundedCornerShape(23)).semantics { contentDescription = app.label }
-                            .clickable(role = Role.Button) { Launch.app(context, app.packageName, app.className, source.anchor()) },
+                            .clickable(role = Role.Button) {
+                                // Destekleniyorsa launcher'dan çıkmadan harita panelinde açılır.
+                                if (!PanelHost.open(context, app.packageName, app.className)) {
+                                    Launch.app(context, app.packageName, app.className, source.anchor())
+                                }
+                            },
                     )
                 }
             }
@@ -532,8 +541,17 @@ private fun MapWidget(modifier: Modifier) {
     }
     val shape = RoundedCornerShape(32.dp)
     val clearance = 14.dp
+    val view = LocalView.current
 
-    Box(modifier.clip(shape).background(if (c.dark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
+    // Panelde açılan uygulamalar tam bu kartın ekrandaki yerine oturur.
+    Box(modifier.onGloballyPositioned { coords ->
+        val r = coords.boundsInWindow()
+        val loc = IntArray(2).also { view.rootView.getLocationOnScreen(it) }
+        val dy = loc[1]
+        PanelHost.bounds = android.graphics.Rect(
+            r.left.toInt() + loc[0], r.top.toInt() + dy, r.right.toInt() + loc[0], r.bottom.toInt() + dy,
+        )
+    }.clip(shape).background(if (c.dark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
         LiveMap(Modifier.fillMaxSize(), dark = c.dark, showLocation = granted, bottomInset = 0f)
         // Navigasyon uygulaması dokunulan yerden (harita, manevra kartı ya da arama çubuğu) büyüyerek açılır.
         val mapSrc = rememberLaunchSource()
