@@ -67,7 +67,22 @@ object PanoIcons {
     val AirFace = line("air.face", circle(17f, 5.5f, 2f) + "M17 9v5.5l2 6M3 8.5h8.5M8.5 5.5l3 3-3 3")
     val AirFeet = line("air.feet", circle(17f, 4.5f, 2f) + "M17 8v6l-2.5 6M3 17.5h8.5M8.5 14.5l3 3-3 3")
     val Defrost = line("defrost", "M3.5 16c3-6.5 14-6.5 17 0M8 9.5c-1-1.2 1-2.3 0-3.5M12 8.5c-1-1.2 1-2.3 0-3.5M16 9.5c-1-1.2 1-2.3 0-3.5M5 20h14")
-    val Location = line("location", "M20 4L3.5 11l7.2 2.3L13 20.5z")
+    // Klima anahtar karoları
+    val Sync = line(
+        "sync",
+        "M4.5 12a7.5 7.5 0 0 1 13-5.1M17.5 3.5v3.4h-3.4M19.5 12a7.5 7.5 0 0 1-13 5.1M6.5 20.5v-3.4h3.4",
+    )
+    val Recirculation = line(
+        "recirculation",
+        "M3 19.5h18M4.5 19.5V14l3-8h9l3 8v5.5" +
+            "M15.2 14.2a3.2 3.2 0 1 0-1.1 2.4M11.9 16.2l2.2.4-.3 2.2",
+    )
+    val RearDefrost = line(
+        "rear.defrost",
+        "M5 4h14a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5v-7A1.5 1.5 0 0 1 5 4z" +
+            "M8 21c-1-1.2 1-2.3 0-3.5M12 21c-1-1.2 1-2.3 0-3.5M16 21c-1-1.2 1-2.3 0-3.5M7 9h10",
+    )
+    val Location =line("location", "M20 4L3.5 11l7.2 2.3L13 20.5z")
     val Search = line("search", circle(10.5f, 10.5f, 6.5f) + "M15.3 15.3L20 20", 2f)
     val Dashboard = line(
         "dashboard",

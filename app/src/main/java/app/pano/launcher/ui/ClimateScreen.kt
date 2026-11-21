@@ -1,6 +1,14 @@
 package app.pano.launcher.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import app.pano.launcher.ui.theme.linkColor
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -143,10 +151,16 @@ private fun CenterPanel(climate: ClimateState, modifier: Modifier) {
 
         Box(Modifier.weight(1f))
 
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(colors.raised)) {
-            SwitchRow("Sürücü ile senkronize et", climate.sync, first = true) { climate.setSyncEnabled(it) }
-            SwitchRow("İç hava sirkülasyonu", climate.recirculation) { climate.recirculation = it }
-            SwitchRow("Arka cam ısıtma", climate.rearDefrost) { climate.rearDefrost = it }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ToggleTile("Senkron", "Sürücü ile senkronize et", PanoIcons.Sync, climate.sync, Modifier.weight(1f)) {
+                climate.setSyncEnabled(it)
+            }
+            ToggleTile("İç hava", "İç hava sirkülasyonu", PanoIcons.Recirculation, climate.recirculation, Modifier.weight(1f)) {
+                climate.recirculation = it
+            }
+            ToggleTile("Arka cam", "Arka cam ısıtma", PanoIcons.RearDefrost, climate.rearDefrost, Modifier.weight(1f)) {
+                climate.rearDefrost = it
+            }
         }
     }
 }
@@ -167,12 +181,34 @@ private fun ModeTile(label: String, icon: ImageVector, on: Boolean, modifier: Mo
     }
 }
 
+/**
+ * Sürüşte kolay dokunulan büyük aç/kapa karosu (CarPlay kontrol merkezi havası).
+ * Kapalıyken nötr zemin, açıkken vurgu rengiyle dolu; karonun tamamı dokunma alanı.
+ */
 @Composable
-private fun SwitchRow(label: String, checked: Boolean, first: Boolean = false, onChange: (Boolean) -> Unit) {
+private fun ToggleTile(
+    label: String,
+    description: String,
+    icon: ImageVector,
+    on: Boolean,
+    modifier: Modifier,
+    onChange: (Boolean) -> Unit,
+) {
     val colors = LocalPano.current
-    if (!first) Box(Modifier.padding(start = 20.dp).fillMaxWidth().height(1.dp).background(colors.hairline))
-    Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = colors.text, fontSize = 17.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-        PanoSwitch(checked, label, onChange)
+    val bg by animateColorAsState(if (on) linkColor() else colors.raised, tween(180), label = "tileBg")
+    val fg by animateColorAsState(if (on) Color.White else colors.text, tween(180), label = "tileFg")
+    val sub by animateColorAsState(if (on) Color.White.copy(alpha = 0.8f) else colors.secondary, tween(180), label = "tileSub")
+    Column(
+        modifier.height(118.dp).clip(RoundedCornerShape(24.dp)).background(bg)
+            .toggleable(value = on, role = Role.Switch, onValueChange = onChange)
+            .semantics { contentDescription = description }
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(32.dp))
+        Column {
+            Text(label, color = fg, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (on) "Açık" else "Kapalı", color = sub, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        }
     }
 }
