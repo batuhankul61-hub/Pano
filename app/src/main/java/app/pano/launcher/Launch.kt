@@ -57,22 +57,40 @@ object Launch {
     fun maps(context: Context, anchor: LaunchAnchor? = null) =
         start(context, Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=")), "Navigasyon uygulaması bulunamadı", anchor)
 
+    /**
+     * Medya oturumunu açan paketin kendi simgesi olmayabilir: BYD'de Spotify çalar ama araç ekranında
+     * onu "com.vivid.music.byd" kabuğu açar. Böyle durumlar için açılacak paket.
+     */
+    private val MEDIA_FRONTENDS = mapOf("com.spotify.music" to "com.vivid.music.byd")
+
+    /** Araç ünitelerinin kendi müzik uygulamaları (standart müzik kategorisi tanımlı değilse). */
+    private val CAR_MUSIC_APPS = listOf("com.byd.mediacenter")
+
+    /** Araç ünitelerinin telefon uygulamaları; standart arama ekranı (DIAL) olmayan cihazlar için. */
+    private val CAR_PHONE_APPS = listOf("com.byd.bluetoothcall")
+
+    private fun launchable(context: Context, packages: List<String?>): Intent? = packages.asSequence()
+        .filterNotNull()
+        .mapNotNull { context.packageManager.getLaunchIntentForPackage(it) }
+        .firstOrNull()
+
+    private fun resolves(context: Context, intent: Intent) =
+        intent.resolveActivity(context.packageManager) != null
+
     fun music(context: Context, activePackage: String?, anchor: LaunchAnchor? = null) {
-        val launch = activePackage?.let { context.packageManager.getLaunchIntentForPackage(it) }
-        if (launch != null) {
-            start(context, launch, "Müzik uygulaması açılamadı", anchor)
-        } else {
-            start(
-                context,
-                Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC),
-                "Müzik uygulaması bulunamadı",
-                anchor,
-            )
-        }
+        val launch = launchable(context, listOf(activePackage, MEDIA_FRONTENDS[activePackage]))
+            ?: Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC).takeIf { resolves(context, it) }
+            ?: launchable(context, CAR_MUSIC_APPS)
+        if (launch != null) start(context, launch, "Müzik uygulaması açılamadı", anchor)
+        else Toast.makeText(context, "Müzik uygulaması bulunamadı", Toast.LENGTH_SHORT).show()
     }
 
-    fun phone(context: Context, anchor: LaunchAnchor? = null) =
-        start(context, Intent(Intent.ACTION_DIAL), "Telefon uygulaması bulunamadı", anchor)
+    fun phone(context: Context, anchor: LaunchAnchor? = null) {
+        val launch = Intent(Intent.ACTION_DIAL).takeIf { resolves(context, it) }
+            ?: launchable(context, CAR_PHONE_APPS)
+        if (launch != null) start(context, launch, "Telefon uygulaması açılamadı", anchor)
+        else Toast.makeText(context, "Telefon uygulaması bulunamadı", Toast.LENGTH_SHORT).show()
+    }
 
     fun settings(context: Context) = start(context, Intent(Settings.ACTION_SETTINGS), "Ayarlar açılamadı")
 

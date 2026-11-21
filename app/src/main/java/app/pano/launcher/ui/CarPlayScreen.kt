@@ -413,7 +413,14 @@ private fun Dashboard(modifier: Modifier) {
     // 1 = park düzeni, 0 = sürüş düzeni. Ağırlık ve boşluklar birlikte küçülür; sıçrama olmaz.
     val parked by animateFloatAsState(if (driving) 0f else 1f, tween(MotionMs * 2), label = "sürüş-düzeni")
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        MapWidget(Modifier.weight(1.25f).fillMaxHeight())
+        // Harita sütunu: altta favori uygulamalar adası, sağdaki Tüketim kartıyla aynı hizada ve boyda.
+        Column(Modifier.weight(1.25f).fillMaxHeight()) {
+            MapWidget(Modifier.weight(1f).fillMaxWidth())
+            if (parked > 0.001f) {
+                Spacer(Modifier.height(18.dp * parked))
+                FavoritesIsland(Modifier.height(IslandHeight * parked).fillMaxWidth().graphicsLayer { alpha = parked }.clipToBounds())
+            }
+        }
         VehicleWidget(Modifier.weight(1f).fillMaxHeight())
         Column(Modifier.weight(0.9f).fillMaxHeight()) {
             if (parked > 0.001f) {
@@ -423,11 +430,14 @@ private fun Dashboard(modifier: Modifier) {
             NowPlayingWidget(Modifier.weight(1.3f).fillMaxWidth())
             if (parked > 0.001f) {
                 Spacer(Modifier.height(18.dp * parked))
-                ConsumptionWidget(Modifier.weight(0.5f * parked).fillMaxWidth().graphicsLayer { alpha = parked }.clipToBounds())
+                ConsumptionWidget(Modifier.height(IslandHeight * parked).fillMaxWidth().graphicsLayer { alpha = parked }.clipToBounds())
             }
         }
     }
 }
+
+/** Alt sıradaki küçük adaların (favoriler, Tüketim) ortak yüksekliği. */
+private val IslandHeight = 112.dp
 
 /**
  * Sürüş sırasında dikkat dağıtan ekranların (uygulama ızgarası, uzun ayar listeleri) yerine
@@ -477,27 +487,18 @@ private fun DrivingGate(title: String, onHome: () -> Unit, content: @Composable 
     }
 }
 
-private val FavStripHeight = 80.dp
-private val FavStripPadding = 14.dp
-/** Atıf yazısı ve konum düğmesi şeridin üstünde dursun diye bırakılan alt boşluk. */
-private val FavStripClearance = FavStripHeight + FavStripPadding + 10.dp
-
-/** Harita kartının altındaki cam şerit: favori uygulamalar tek satırda, dokununca açılır. */
+/** Haritanın altındaki cam ada: favori uygulamalar tek satırda, dokununca açılır. */
 @Composable
-private fun FavoritesStrip(c: GlassColors, modifier: Modifier) {
+private fun FavoritesIsland(modifier: Modifier) {
+    val c = glass()
     val context = LocalContext.current
     FavoritesStore.load(context)
     val favorites by FavoritesStore.state
-    val shape = RoundedCornerShape(28.dp)
 
     Row(
-        modifier.clip(shape).background(c.overMap)
-            .border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), shape)
-            // Şeridin boş yerine dokunmak alttaki haritayı açmasın.
-            .pointerInput(Unit) { detectTapGestures { } }
-            .padding(horizontal = 14.dp),
+        modifier.glass(c).padding(horizontal = 22.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         if (favorites.isEmpty()) {
             Icon(PanoIcons.Star, contentDescription = null, tint = c.tertiary, modifier = Modifier.padding(start = 6.dp).size(20.dp))
@@ -511,7 +512,7 @@ private fun FavoritesStrip(c: GlassColors, modifier: Modifier) {
                 key(app.packageName, app.className) {
                     val source = rememberLaunchSource()
                     AppIcon(
-                        app.packageName, app.className, 56.dp,
+                        app.packageName, app.className, 64.dp,
                         Modifier.pressScale().launchSource(source).clip(RoundedCornerShape(23)).semantics { contentDescription = app.label }
                             .clickable(role = Role.Button) { Launch.app(context, app.packageName, app.className, source.anchor()) },
                     )
@@ -530,12 +531,10 @@ private fun MapWidget(modifier: Modifier) {
         granted = hasLocationPermission(context)
     }
     val shape = RoundedCornerShape(32.dp)
-    val driving by VehicleHub.isDriving.collectAsState()
-    // Favori şeridi sürüşte gizlenince atıf ve konum düğmesi aşağı kayar.
-    val clearance by animateDpAsState(if (driving) 14.dp else FavStripClearance, tween(MotionMs * 2), label = "şerit-boşluğu")
+    val clearance = 14.dp
 
     Box(modifier.clip(shape).background(if (c.dark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
-        LiveMap(Modifier.fillMaxSize(), dark = c.dark, showLocation = granted, bottomInset = 0.24f)
+        LiveMap(Modifier.fillMaxSize(), dark = c.dark, showLocation = granted, bottomInset = 0f)
         // Navigasyon uygulaması dokunulan yerden (harita, manevra kartı ya da arama çubuğu) büyüyerek açılır.
         val mapSrc = rememberLaunchSource()
         val barSrc = rememberLaunchSource()
@@ -572,15 +571,6 @@ private fun MapWidget(modifier: Modifier) {
                 Icon(PanoIcons.Location, contentDescription = null, tint = linkColor(), modifier = Modifier.size(20.dp))
                 Text("Konumumu göster", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp))
             }
-        }
-
-        AnimatedVisibility(
-            visible = !driving,
-            enter = fadeIn(tween(MotionMs)) + slideInVertically(tween(MotionMs * 2)) { it / 2 },
-            exit = fadeOut(tween(MotionMs)) + slideOutVertically(tween(MotionMs * 2)) { it / 2 },
-            modifier = Modifier.align(Alignment.BottomCenter),
-        ) {
-            FavoritesStrip(c, Modifier.padding(FavStripPadding).fillMaxWidth().height(FavStripHeight))
         }
 
         // OpenStreetMap lisansı gereği atıf görünür kalmalı.

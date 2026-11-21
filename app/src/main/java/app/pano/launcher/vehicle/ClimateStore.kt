@@ -42,6 +42,8 @@ object ClimateStore {
         CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).launch {
             snapshotFlow { Values.of(s) }.drop(1).collect { save(p, it) }
         }
+        // BYD araçta klima araçla eşlenir; araç değerleri kayıtlı olanların önüne geçer.
+        BydClimate.attach(context, s)
         return s
     }
 

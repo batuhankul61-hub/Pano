@@ -35,8 +35,19 @@ object VehicleSource {
     }
 }
 
-/** Klima ayarları. Şimdilik sadece ekranda tutuluyor, araca gönderilmiyor. */
+/**
+ * Klima ayarları. BYD araçta [BydClimate] bunları araçla iki yönlü eşler ([linked] = true);
+ * başka cihazlarda yalnızca ekranda tutulur.
+ */
 class ClimateState {
+    /** Araca bağlı mı; değilse ayarlar yalnızca Pano'da kalır. */
+    var linked by mutableStateOf(false)
+
+    /** Sıcaklık adımı ve aralığı; BYD tam derece ve 17–33 °C kabul ediyor. */
+    var step = 0.5f
+    var minTemp = 16f
+    var maxTemp = 30f
+
     var driver by mutableFloatStateOf(22f)
     var passenger by mutableFloatStateOf(21f)
     var fan by mutableIntStateOf(3)
@@ -53,13 +64,14 @@ class ClimateState {
 
     val isOff: Boolean get() = fan == 0
 
+    /** [delta] yalnızca yön bildirir; adım [step] kadardır. */
     fun changeDriver(delta: Float) {
-        driver = clamp(driver + delta)
+        driver = clamp(driver + if (delta > 0) step else -step)
         if (sync) passenger = driver
     }
 
     fun changePassenger(delta: Float) {
-        if (sync) changeDriver(delta) else passenger = clamp(passenger + delta)
+        if (sync) changeDriver(delta) else passenger = clamp(passenger + if (delta > 0) step else -step)
     }
 
     fun setSyncEnabled(on: Boolean) {
@@ -78,7 +90,7 @@ class ClimateState {
         auto = false
     }
 
-    private fun clamp(t: Float) = ((t * 2).roundToInt() / 2f).coerceIn(16f, 30f)
+    private fun clamp(t: Float) = ((t / step).roundToInt() * step).coerceIn(minTemp, maxTemp)
 }
 
 private val turkish = Locale.forLanguageTag("tr-TR")

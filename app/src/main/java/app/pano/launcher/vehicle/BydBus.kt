@@ -1,5 +1,5 @@
 /*
- * BYD genel özellik veri yoluna salt okunur erişim.
+ * BYD genel özellik veri yoluna erişim (okuma; klima için yazma).
  *
  * Kaynak: ESMER-UI (https://github.com/akyuznet/ESMER-UI)
  *   app/src/main/java/com/example/esmerui/car/BydFeatures.kt, CarBus.kt
@@ -56,6 +56,7 @@ internal object BydBus {
     @Volatile private var manager: Any? = null
     private var getInt: Method? = null
     private var getDouble: Method? = null
+    private var setIntArray: Method? = null
     private val ids = HashMap<String, Int?>()
     private var tried = false
 
@@ -75,6 +76,9 @@ internal object BydBus {
             val int = Int::class.javaPrimitiveType
             getInt = clazz.getMethod("getInt", int, int)
             getDouble = runCatching { clazz.getMethod("getDouble", int, int) }.getOrNull()
+            setIntArray = runCatching {
+                clazz.getMethod("setIntArray", int, IntArray::class.java, IntArray::class.java)
+            }.getOrNull()
             manager = instance
             instance != null
         }.onFailure {
@@ -99,6 +103,22 @@ internal object BydBus {
     private fun lookup(group: String, field: String): Int? = runCatching {
         Class.forName("android.hardware.bydauto.BYDAutoFeatureIds\$$group").getField(field).getInt(null)
     }.getOrNull()
+        // DiLink 3.0'da yazma kimlikleri (…_SET) üst sınıfta da duruyor.
+        ?: runCatching { Class.forName("android.hardware.bydauto.BYDAutoFeatureIds").getField(field).getInt(null) }.getOrNull()
+
+    /**
+     * Birden çok sinyali tek komutla yazar (BYD'nin kendi cihaz sınıfları da böyle gönderir).
+     * Dönüş: platformun sonuç kodu (0 = kabul); yönetici ya da kimlik yoksa null.
+     */
+    fun write(deviceType: Int, group: String, fields: List<String>, values: IntArray): Int? {
+        val target = manager ?: return null
+        val method = setIntArray ?: return null
+        val idArray = IntArray(fields.size) { featureId(group, fields[it]) ?: return null }
+        return runCatching { method.invoke(target, deviceType, idArray, values) as? Int }
+            .onFailure { Log.w(TAG, "yazma $fields: ${it.cause ?: it}") }
+            .getOrNull()
+            .also { Log.i(TAG, "yazma $fields=${values.toList()} → $it") }
+    }
 
     /** Cihaz sınıflarında tanımlı sabit (örn. vites kodları). */
     fun deviceConstant(deviceClass: String, field: String): Int? = runCatching {
