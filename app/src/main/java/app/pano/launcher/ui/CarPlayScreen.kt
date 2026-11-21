@@ -85,6 +85,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
+import app.pano.launcher.settings.DockStore
+import app.pano.launcher.settings.DockControl
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.launch
@@ -297,12 +303,24 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                         enter = fadeIn(tween(MotionMs)) + expandVertically(tween(MotionMs)),
                         exit = fadeOut(tween(MotionMs / 2)) + shrinkVertically(tween(MotionMs)),
                     ) {
-                        ClimateStrip(
-                            climate, { onNavigate(Screen.Climate) },
-                            onHome = { AppSheet.close(); onNavigate(Screen.Home) },
-                            Modifier.fillMaxWidth().height(92.dp),
-                        )
+                        ClimateStrip(climate, onNavigate, Modifier.fillMaxWidth().height(92.dp))
                     }
+                }
+            }
+            // Dock düzenleme paneli: şeridin üstünde, arkası karartılmış; boşluğa dokununca kapanır.
+            AnimatedVisibility(
+                visible = DockEditing.open,
+                enter = fadeIn(tween(MotionMs)),
+                exit = fadeOut(tween(MotionMs)),
+            ) {
+                Box(
+                    Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f))
+                        .pointerInput(Unit) { detectTapGestures { DockEditing.open = false } },
+                ) {
+                    DockEditor(
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = 130.dp).width(1280.dp)
+                            .pointerInput(Unit) { detectTapGestures { } },
+                    )
                 }
             }
         }
@@ -1108,56 +1126,208 @@ private fun ConsumptionWidget(modifier: Modifier) {
 
 // ───────────────────────── Alt klima şeridi ─────────────────────────
 
+/** Dock düzenleme paneli açık mı (şeride basılı tutunca açılır). */
+private object DockEditing {
+    var open by mutableStateOf(false)
+}
+
+/**
+ * Alt şerit (dock): aracın alt sistem çubuğunun yerini tutar. Hangi kontrollerin görüneceğini
+ * kullanıcı seçer ([DockStore]); şeride basılı tutunca düzenleme paneli açılır. "Alt sistem
+ * çubuğunu gizle" açıkken launcher'dan çıkmadan her şey buradan yönetilir.
+ */
 @Composable
-private fun ClimateStrip(climate: ClimateState, onOpen: () -> Unit, onHome: () -> Unit, modifier: Modifier) {
+private fun ClimateStrip(climate: ClimateState, onNavigate: (Screen) -> Unit, modifier: Modifier) {
     val c = glass()
     val context = LocalContext.current
-    // Aracın alt sistem çubuğunun yerini tutar: ev, sıcaklık, klima, fan, araç ayarları.
-    // "Alt sistem çubuğunu gizle" açıkken launcher'dan çıkmadan her şey buradan yönetilir.
-    Row(
-        modifier.glass(c, RoundedCornerShape(30.dp)).padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    DockStore.load(context)
+    val selected by DockStore.state
+
+    BoxWithConstraints(
+        modifier.glass(c, RoundedCornerShape(30.dp)).longPressAnywhere { DockEditing.open = true },
+        contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.Home, "Ana pano", onHome, c.chip, c.text, size = 58.dp, iconSize = 24.dp) }
-        // Tek bölgeli klimada tek, geniş bir sürgü (yanında ‹ › ile derece derece); çift bölgede sürücü ve yolcu ayrı.
-        if (!climate.dualZone) {
-            Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronLeft, "Sıcaklığı düşür", { climate.changeDriver(-1f) }, Color.Transparent, c.text, size = 58.dp, iconSize = 22.dp) }
+        val minWidth = maxWidth
+        // Çok kontrol seçilirse şerit yana kaydırılır; azsa ortalanır.
+        Row(Modifier.horizontalScroll(rememberScrollState())) {
+            Row(
+                Modifier.widthIn(min = minWidth).padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+            ) {
+                DockControl.entries.filter { it in selected }.forEach { control ->
+                    DockItemView(control, climate, onNavigate)
+                }
+            }
         }
-        TempSlider(
-            climate.driver, climate, if (climate.dualZone) "Sürücü" else "Sıcaklık",
-            Modifier.width(if (climate.dualZone) 300.dp else 360.dp),
-        ) { climate.setDriverTemp(it) }
-        if (!climate.dualZone) {
-            Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronRight, "Sıcaklığı artır", { climate.changeDriver(1f) }, Color.Transparent, c.text, size = 58.dp, iconSize = 22.dp) }
+    }
+}
+
+@Composable
+private fun DockItemView(control: DockControl, climate: ClimateState, onNavigate: (Screen) -> Unit) {
+    val c = glass()
+    val context = LocalContext.current
+    val playing by MediaHub.state.collectAsState()
+    @Composable
+    fun icon(i: ImageVector, label: String, onClick: () -> Unit) =
+        Box(Modifier.pressScale()) { RoundIconButton(i, label, onClick, c.chip, c.text, size = 58.dp, iconSize = 24.dp) }
+
+    when (control) {
+        DockControl.Home -> icon(PanoIcons.Home, "Ana pano") { AppSheet.close(); onNavigate(Screen.Home) }
+        DockControl.Temperature -> Row(verticalAlignment = Alignment.CenterVertically) {
+            // Tek bölgede tek, geniş sürgü ve yanında derece derece ‹ ›; çift bölgede sürücü sürgüsü.
+            if (!climate.dualZone) {
+                RoundIconButton(PanoIcons.ChevronLeft, "Sıcaklığı düşür", { climate.changeDriver(-1f) }, Color.Transparent, c.text, size = 58.dp, iconSize = 22.dp)
+            }
+            TempSlider(
+                climate.driver, climate, if (climate.dualZone) "Sürücü" else "Sıcaklık",
+                Modifier.width(if (climate.dualZone) 280.dp else 340.dp),
+            ) { climate.setDriverTemp(it) }
+            if (!climate.dualZone) {
+                RoundIconButton(PanoIcons.ChevronRight, "Sıcaklığı artır", { climate.changeDriver(1f) }, Color.Transparent, c.text, size = 58.dp, iconSize = 22.dp)
+            }
         }
-        Row(
-            Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+        DockControl.PassengerTemperature -> if (climate.dualZone) {
+            TempSlider(climate.passenger, climate, "Yolcu", Modifier.width(280.dp)) { climate.setPassengerTemp(it) }
+        }
+        DockControl.Auto -> GlassPill("Otomatik", climate.auto) { climate.auto = !climate.auto }
+        DockControl.AC -> GlassPill("A/C", climate.ac) { climate.ac = !climate.ac }
+        DockControl.Fan -> Row(
+            Modifier.height(58.dp).clip(RoundedCornerShape(29.dp)).background(c.chip),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            GlassPill("Otomatik", climate.auto) { climate.auto = !climate.auto }
-            GlassPill("A/C", climate.ac) { climate.ac = !climate.ac }
-            Row(
-                Modifier.height(58.dp).clip(RoundedCornerShape(29.dp)).background(c.chip),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RoundIconButton(PanoIcons.Minus, "Fanı azalt", { climate.setFanLevel(climate.fan - 1) }, Color.Transparent, c.text, size = 58.dp, iconSize = 20.dp)
-                Icon(PanoIcons.Fan, contentDescription = null, tint = c.text, modifier = Modifier.size(24.dp))
-                Text(
-                    if (climate.isOff) "Kapalı" else "${climate.fan}",
-                    color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center, modifier = Modifier.width(64.dp),
-                )
-                RoundIconButton(PanoIcons.Plus, "Fanı artır", { climate.setFanLevel(climate.fan + 1) }, Color.Transparent, c.text, size = 58.dp, iconSize = 20.dp)
-            }
-            Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronUp, "Klima ayrıntıları", onOpen, c.chip, c.text, size = 58.dp, iconSize = 22.dp) }
+            RoundIconButton(PanoIcons.Minus, "Fanı azalt", { climate.setFanLevel(climate.fan - 1) }, Color.Transparent, c.text, size = 58.dp, iconSize = 20.dp)
+            Icon(PanoIcons.Fan, contentDescription = null, tint = c.text, modifier = Modifier.size(24.dp))
+            Text(
+                if (climate.isOff) "Kapalı" else "${climate.fan}",
+                color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center, modifier = Modifier.width(64.dp),
+            )
+            RoundIconButton(PanoIcons.Plus, "Fanı artır", { climate.setFanLevel(climate.fan + 1) }, Color.Transparent, c.text, size = 58.dp, iconSize = 20.dp)
         }
-        if (climate.dualZone) {
-            TempSlider(climate.passenger, climate, "Yolcu", Modifier.width(300.dp)) { climate.setPassengerTemp(it) }
+        DockControl.Power -> DockToggle(PanoIcons.Power, "Klima", !climate.isOff) {
+            if (climate.isOff) climate.setFanLevel(1) else climate.powerOff()
         }
-        Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.Car, "Araç ayarları", { Launch.carSettings(context) }, c.chip, c.text, size = 58.dp, iconSize = 26.dp) }
+        DockControl.Recirculation -> DockToggle(PanoIcons.Recirculation, "Devridaim", climate.recirculation) { climate.recirculation = !climate.recirculation }
+        DockControl.Defrost -> DockToggle(PanoIcons.Defrost, "Ön cam buğu çözme", climate.defrost) { climate.defrost = !climate.defrost }
+        DockControl.RearDefrost -> DockToggle(PanoIcons.RearDefrost, "Arka cam ısıtma", climate.rearDefrost) { climate.rearDefrost = !climate.rearDefrost }
+        DockControl.ClimateDetail -> icon(PanoIcons.ChevronUp, "Klima ayrıntıları") { onNavigate(Screen.Climate) }
+        DockControl.Navigation -> icon(PanoIcons.Navigation, "Navigasyon") { Launch.maps(context) }
+        DockControl.Music -> icon(PanoIcons.Music, "Müzik") { Launch.music(context, playing?.packageName) }
+        DockControl.Phone -> icon(PanoIcons.Phone, "Telefon") { Launch.phone(context) }
+        DockControl.Apps -> icon(PanoIcons.Apps, "Uygulamalar") { onNavigate(Screen.Apps) }
+        DockControl.CarSettings -> icon(PanoIcons.Car, "Araç ayarları") { Launch.carSettings(context) }
+        DockControl.PanoSettings -> icon(PanoIcons.Sliders, "Pano ayarları") { onNavigate(Screen.Settings) }
     }
+}
+
+/** Açık/kapalı durumlu yuvarlak dock düğmesi (devridaim, buğu çözme…): açıkken vurgu renginde. */
+@Composable
+private fun DockToggle(icon: ImageVector, label: String, on: Boolean, onClick: () -> Unit) {
+    val c = glass()
+    Box(Modifier.pressScale()) {
+        RoundIconButton(icon, label, onClick, if (on) linkColor() else c.chip, if (on) Color.White else c.text, size = 58.dp, iconSize = 24.dp)
+    }
+}
+
+/**
+ * Şeridin herhangi bir yerine (düğmelerin üstü dahil) basılı tutmayı yakalar. Parmak kaydırılırsa
+ * (sürgü) uzun basma sayılmaz. Uzun basma algılanınca dokunuş tüketilir, alttaki düğme çalışmaz.
+ */
+private fun Modifier.longPressAnywhere(onLongPress: () -> Unit): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        val slop = viewConfiguration.touchSlop
+        val deadline = down.uptimeMillis + viewConfiguration.longPressTimeoutMillis + 150
+        var long = false
+        var now = down.uptimeMillis
+        while (true) {
+            val remaining = deadline - now
+            if (remaining <= 0) { long = true; break }
+            val event = withTimeoutOrNull(remaining) { awaitPointerEvent(PointerEventPass.Initial) }
+            if (event == null) { long = true; break }
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            now = change.uptimeMillis
+            if (!change.pressed) break
+            if ((change.position - down.position).getDistance() > slop) break
+        }
+        if (long) {
+            onLongPress()
+            // Parmak kalkana kadar her şeyi tüket: alttaki düğme tıklanmasın.
+            do {
+                val e = awaitPointerEvent(PointerEventPass.Initial)
+                e.changes.forEach { it.consume() }
+            } while (e.changes.any { it.pressed })
+        }
+    }
+}
+
+/** Dock düzenleme paneli: kontroller gruplar halinde; dokununca şeride eklenir / çıkarılır. */
+@Composable
+private fun DockEditor(modifier: Modifier) {
+    val c = glass()
+    val selected by DockStore.state
+    Column(
+        modifier.shadow(30.dp, RoundedCornerShape(32.dp)).clip(RoundedCornerShape(32.dp))
+            .background(if (c.dark) Color(0xF71A1C22) else Color(0xFAF6F7F9))
+            .padding(28.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Alt şeridi düzenle", color = c.text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+                Text("Dokunarak ekle ya da çıkar. Değişiklik hemen uygulanır.", color = c.secondary, fontSize = 16.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            Text(
+                "Varsayılana dön", color = Accent.Red, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { DockStore.reset() }.padding(horizontal = 16.dp, vertical = 14.dp),
+            )
+            Box(Modifier.padding(start = 8.dp)) {
+                GlassPill("Bitti", true) { DockEditing.open = false }
+            }
+        }
+        DockControl.entries.groupBy { it.group }.forEach { (group, controls) ->
+            Text(group, color = c.secondary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 22.dp, bottom = 10.dp))
+            controls.chunked(5).forEach { row ->
+                Row(Modifier.padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    row.forEach { control ->
+                        val on = control in selected
+                        Row(
+                            Modifier.width(232.dp).height(64.dp).clip(RoundedCornerShape(20.dp))
+                                .background(if (on) linkColor() else c.chip)
+                                .clickable(role = Role.Switch) { DockStore.toggle(control) }
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(dockIcon(control), contentDescription = null, tint = if (on) Color.White else c.text, modifier = Modifier.size(24.dp))
+                            Text(
+                                control.label, color = if (on) Color.White else c.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun dockIcon(control: DockControl): ImageVector = when (control) {
+    DockControl.Home -> PanoIcons.Home
+    DockControl.Temperature, DockControl.PassengerTemperature -> PanoIcons.Sun
+    DockControl.Auto -> PanoIcons.Sync
+    DockControl.AC -> PanoIcons.Snow
+    DockControl.Fan -> PanoIcons.Fan
+    DockControl.Power -> PanoIcons.Power
+    DockControl.Recirculation -> PanoIcons.Recirculation
+    DockControl.Defrost -> PanoIcons.Defrost
+    DockControl.RearDefrost -> PanoIcons.RearDefrost
+    DockControl.ClimateDetail -> PanoIcons.ChevronUp
+    DockControl.Navigation -> PanoIcons.Navigation
+    DockControl.Music -> PanoIcons.Music
+    DockControl.Phone -> PanoIcons.Phone
+    DockControl.Apps -> PanoIcons.Apps
+    DockControl.CarSettings -> PanoIcons.Car
+    DockControl.PanoSettings -> PanoIcons.Sliders
 }
 
 /**
