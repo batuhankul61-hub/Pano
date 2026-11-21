@@ -225,8 +225,9 @@ private fun OptionRow(title: String, control: @Composable () -> Unit) {
         Modifier.fillMaxWidth().height(84.dp).padding(horizontal = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-        control()
+        // Etiket sabit genişlikte; kontrol kalan alana sığar (sağ ekran gibi dar alanlarda ezilmez).
+        Text(title, color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.width(130.dp))
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { control() }
     }
 }
 

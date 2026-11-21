@@ -85,6 +85,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
@@ -268,8 +269,9 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                 Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                   Box(Modifier.weight(1f).fillMaxWidth()) {
                     // Ekranlar arası kısa fade + hafif dikey kayma.
+                    // Uygulamalar ve Ayarlar sağ ekranda açılır; arkada ana pano kalır.
                     AnimatedContent(
-                        targetState = screen,
+                        targetState = if (screen == Screen.Apps || screen == Screen.Settings) Screen.Home else screen,
                         transitionSpec = {
                             val dir = if (targetState.order() > initialState.order()) 1 else -1
                             (fadeIn(tween(MotionMs)) + slideInVertically(tween(MotionMs)) { dir * it / 14 })
@@ -282,13 +284,13 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                             when (target) {
                                 Screen.Home -> Dashboard(Modifier.fillMaxSize())
                                 Screen.Climate -> ClimateScreen(climate) { onNavigate(Screen.Home) }
-                                Screen.Apps -> DrivingGate("Uygulamalar", { onNavigate(Screen.Home) }) { AppsScreen { onNavigate(Screen.Home) } }
-                                Screen.Settings -> DrivingGate("Ayarlar", { onNavigate(Screen.Home) }) { SettingsScreen { onNavigate(Screen.Home) } }
+                                // Sağ ekranda açılırlar (RightScreenHost).
+                                Screen.Apps, Screen.Settings -> Dashboard(Modifier.fillMaxSize())
                             }
                         }
                     }
-                    // Sağdan gelen uygulama paneli: harita ve uygulama çubuğu açık kalır.
-                    SheetHost(Modifier.fillMaxHeight().fillMaxWidth(0.64f).align(Alignment.CenterEnd))
+                    // Tesla tarzı sağ ekran: harita ve uygulama çubuğu açık kalır.
+                    RightScreenHost(screen, onNavigate, Modifier.fillMaxSize())
                   }
                     AnimatedVisibility(
                         visible = screen != Screen.Climate,
@@ -457,86 +459,118 @@ private fun Dashboard(modifier: Modifier) {
 /** Alt sıradaki küçük adaların (favoriler, Tüketim) ortak yüksekliği. */
 private val IslandHeight = 112.dp
 
+/** Sağ ekranda ne açık: bir web uygulaması ya da Pano'nun kendi ekranı (Uygulamalar, Ayarlar). */
+private sealed interface RightContent {
+    data class Web(val page: AppSheet.Page) : RightContent
+    data class Native(val screen: Screen) : RightContent
+}
+
 /**
- * Sağdan kayarak gelen uygulama paneli ([AppSheet]). Başlıktan ya da sol kenardaki tutamaktan
- * sağa sürükleyince birlikte kayar; yarıdan fazla çekilip bırakılırsa kapanır, azsa yerine döner.
- * Araç hareket halindeyken içerik (video) kilitlenir.
+ * Tesla tarzı sağ ekran: harita ve uygulama çubuğu yerinde kalır, sağ taraf (araç kartından
+ * itibaren) yeni ekranla değişir. Yüzen pencere gibi değil, panonun bir parçası gibi durur:
+ * diğer kartlarla aynı yüzey ve köşeler, gölge yok. Sağdan kayarak gelir; sol kenarından ya da
+ * başlığından sağa sürükleyince birlikte kayar, üçte birden fazla çekilirse kapanır.
+ * Araç hareket halindeyken web içeriği (video) kilitlenir.
  */
 @Composable
-private fun SheetHost(modifier: Modifier) {
+private fun RightScreenHost(screen: Screen, onNavigate: (Screen) -> Unit, modifier: Modifier) {
     val c = glass()
     val page = AppSheet.page
+    val native = screen == Screen.Apps || screen == Screen.Settings
+
+    // Aynı anda tek içerik: yerel ekran seçilince web kapanır, web açılınca yerel ekran kapanır.
+    LaunchedEffect(screen) { if (native) AppSheet.close() }
+    LaunchedEffect(page) { if (page != null && native) onNavigate(Screen.Home) }
+
+    val target: RightContent? = when {
+        native -> RightContent.Native(screen)
+        page != null -> RightContent.Web(page)
+        else -> null
+    }
+    fun close() = if (native) onNavigate(Screen.Home) else AppSheet.close()
+
     // Kapanış animasyonu bitene kadar içerik ekranda kalsın.
-    var shown by remember { mutableStateOf<AppSheet.Page?>(null) }
-    if (page != null) shown = page
+    var shown by remember { mutableStateOf<RightContent?>(null) }
+    if (target != null) shown = target
     // 1 = tamamen dışarıda (sağda), 0 = açık.
     val hidden = remember { Animatable(1f) }
     val scope = rememberCoroutineScope()
     val driving by VehicleHub.isDriving.collectAsState()
     var web by remember { mutableStateOf<android.webkit.WebView?>(null) }
 
-    LaunchedEffect(page) {
-        if (page != null) {
-            hidden.animateTo(0f, spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow))
+    LaunchedEffect(target != null) {
+        if (target != null) {
+            hidden.animateTo(0f, spring(dampingRatio = 0.92f, stiffness = Spring.StiffnessMediumLow))
         } else {
             hidden.animateTo(1f, tween(MotionMs))
             shown = null
         }
     }
 
-    val p = shown ?: return
+    val content = shown ?: return
     BoxWithConstraints(modifier) {
-        val widthPx = constraints.maxWidth.toFloat()
+        // Ana panodaki sütunlarla aynı hesap (harita 1,25 · araç 1 · sağ 0,9; aralık 18): sağ ekran
+        // araç kartının sol kenarından başlar ve ızgaraya tam oturur.
+        val unit = (maxWidth - 36.dp) / 3.15f
+        val width = maxWidth - unit * 1.25f - 18.dp
+        val widthPx = with(LocalDensity.current) { width.toPx() }
         val shape = RoundedCornerShape(32.dp)
 
         fun dragBy(dx: Float) = scope.launch { hidden.snapTo((hidden.value + dx / widthPx).coerceIn(0f, 1f)) }
         fun settle() = scope.launch {
-            if (hidden.value > 0.3f) AppSheet.close()
-            else hidden.animateTo(0f, spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow))
+            if (hidden.value > 0.3f) close()
+            else hidden.animateTo(0f, spring(dampingRatio = 0.92f, stiffness = Spring.StiffnessMediumLow))
         }
-        val dragToClose = Modifier.pointerInput(Unit) {
+        val dragToClose = Modifier.pointerInput(native) {
             detectHorizontalDragGestures(onDragEnd = { settle() }, onDragCancel = { settle() }) { change, dx ->
                 change.consume()
                 dragBy(dx)
             }
         }
 
-        Row(
-            Modifier.fillMaxSize()
-                .graphicsLayer { translationX = hidden.value * (widthPx + 40f) }
-                .shadow(28.dp, shape)
+        Box(
+            Modifier.align(Alignment.CenterEnd).width(width).fillMaxHeight()
+                .graphicsLayer { translationX = hidden.value * (widthPx + 60f) }
                 .clip(shape)
-                .background(if (c.dark) Color(0xFF111214) else Color(0xFFF4F5F7)),
+                // Opak yüzey: arkadaki kartlar görünmesin, ama panodaki cam kartlarla aynı ton.
+                .background(if (c.dark) Color(0xFF1A1C22) else Color(0xFFF3F4F7))
+                .border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), shape),
         ) {
-            // Sol kenar tutamağı: sürüklenince panel kayar.
-            Box(Modifier.width(28.dp).fillMaxHeight().then(dragToClose), contentAlignment = Alignment.Center) {
-                Box(Modifier.width(5.dp).height(64.dp).clip(RoundedCornerShape(3.dp)).background(c.secondary.copy(alpha = 0.5f)))
-            }
-            Column(Modifier.weight(1f).fillMaxHeight()) {
-                Row(
-                    Modifier.fillMaxWidth().height(64.dp).then(dragToClose).padding(end = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RoundIconButton(PanoIcons.ChevronLeft, "Geri", { web?.let { if (it.canGoBack()) it.goBack() } }, Color.Transparent, c.text, size = 56.dp, iconSize = 24.dp)
-                    Text(p.title, color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).padding(start = 6.dp))
-                    RoundIconButton(PanoIcons.Close, "Kapat", { AppSheet.close() }, c.chip, c.text, size = 52.dp, iconSize = 22.dp)
+            when (content) {
+                is RightContent.Native -> Box(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 16.dp)) {
+                    when (content.screen) {
+                        Screen.Apps -> DrivingGate("Uygulamalar", { onNavigate(Screen.Home) }) { AppsScreen { onNavigate(Screen.Home) } }
+                        else -> DrivingGate("Ayarlar", { onNavigate(Screen.Home) }) { SettingsScreen { onNavigate(Screen.Home) } }
+                    }
                 }
-                Box(Modifier.fillMaxSize().padding(start = 0.dp, end = 12.dp, bottom = 12.dp).clip(RoundedCornerShape(20.dp))) {
-                    if (driving) {
-                        // Sürüşte video ve web içeriği gösterilmez.
-                        Column(
-                            Modifier.fillMaxSize().background(c.chip),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Text("${p.title} sürüş sırasında kapalı", color = c.text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Araç durunca kendiliğinden açılır.", color = c.secondary, fontSize = 18.sp, modifier = Modifier.padding(top = 8.dp))
+                is RightContent.Web -> Column(Modifier.fillMaxSize()) {
+                    val p = content.page
+                    Row(
+                        Modifier.fillMaxWidth().height(68.dp).then(dragToClose).padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RoundIconButton(PanoIcons.ChevronLeft, "Geri", { web?.let { if (it.canGoBack()) it.goBack() } }, Color.Transparent, c.text, size = 56.dp, iconSize = 24.dp)
+                        Text(p.title, color = c.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).padding(start = 4.dp))
+                        RoundIconButton(PanoIcons.Close, "Kapat", { close() }, Color.Transparent, c.secondary, size = 56.dp, iconSize = 22.dp)
+                    }
+                    Box(Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, bottom = 14.dp).clip(RoundedCornerShape(22.dp))) {
+                        if (driving) {
+                            Column(
+                                Modifier.fillMaxSize().background(c.chip),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                Text("${p.title} sürüş sırasında kapalı", color = c.text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Araç durunca kendiliğinden açılır.", color = c.secondary, fontSize = 18.sp, modifier = Modifier.padding(top = 8.dp))
+                            }
+                        } else {
+                            SheetWebView(p.url, Modifier.fillMaxSize()) { web = it }
                         }
-                    } else {
-                        SheetWebView(p.url, Modifier.fillMaxSize()) { web = it }
                     }
                 }
             }
+            // Sol kenar: görünmez sürükleme şeridi (yerel ekranlarda da kapatmak için).
+            Box(Modifier.align(Alignment.CenterStart).width(24.dp).fillMaxHeight().then(dragToClose))
         }
     }
 }
