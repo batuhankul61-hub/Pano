@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -15,14 +17,36 @@ android {
         versionName = "0.1.0"
     }
 
+    // Release imzası: proje kökündeki keystore.properties'ten okunur (depoya girmez).
+    // Dosya yoksa derleme kırılmaz; debug anahtarıyla imzalanır ve uyarı basılır.
+    val keystoreProps = Properties()
+    val keystoreFile = rootProject.file("keystore.properties")
+    val hasReleaseKey = keystoreFile.exists()
+    if (hasReleaseKey) keystoreFile.inputStream().use { keystoreProps.load(it) }
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             // R8 kodu küçültür ve optimize eder; Compose release'de debug'a göre belirgin şekilde akıcı çalışır.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Şimdilik debug anahtarıyla imzalanıyor; mağazaya çıkmadan önce gerçek anahtar eklenmeli.
-            signingConfig = signingConfigs.getByName("debug")
+            if (hasReleaseKey) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                logger.warn("UYARI: keystore.properties bulunamadı; release sürümü DEBUG anahtarıyla imzalanıyor.")
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 

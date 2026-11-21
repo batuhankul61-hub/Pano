@@ -16,7 +16,7 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 - Ekran görüntüsü: `adb shell screencap -p /sdcard/x.png` + `adb pull` (PowerShell'de `exec-out ... >` ikili dosyayı bozar).
 - Ayarları değiştirmek için (yalnızca debug sürümde): `adb shell run-as app.pano.launcher ...` ile `shared_prefs/pano_style.xml`.
 - Emülatör yavaş: kare süresi ~28 ms civarında takılıyor ve bu uygulamadan kaynaklanmıyor. Performansı gerçek cihazda değerlendir.
-- Release sürümünde R8 açık (`app/proguard-rules.pro`) ve hâlâ debug anahtarıyla imzalanıyor.
+- Release sürümünde R8 açık (`app/proguard-rules.pro`) ve proje kökündeki `keystore.properties` ile imzalanıyor (şablon: `keystore.properties.example`; dosya yoksa uyarıyla debug anahtarına düşer). Anahtar (`pano-release.jks`) depoya girmez, kaybolursa güncelleme yapılamaz: yedekle.
 
 ## Mimari
 
