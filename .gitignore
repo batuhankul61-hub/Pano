@@ -1,0 +1,14 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.kotlin/
+
+# İmza anahtarları ve şifreleri asla depoya girmesin
+*.jks
+*.keystore
+keystore.properties
+.claude/settings.local.json

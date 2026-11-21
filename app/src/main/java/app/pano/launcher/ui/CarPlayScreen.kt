@@ -1,0 +1,583 @@
+package app.pano.launcher.ui
+
+import android.Manifest
+import android.os.SystemClock
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.pano.launcher.Launch
+import app.pano.launcher.Screen
+import app.pano.launcher.media.MediaHub
+import app.pano.launcher.ui.theme.Accent
+import app.pano.launcher.ui.theme.LocalPano
+import app.pano.launcher.ui.theme.linkColor
+import app.pano.launcher.vehicle.ClimateState
+import app.pano.launcher.vehicle.VehicleSource
+import app.pano.launcher.vehicle.decimal
+import app.pano.launcher.vehicle.shortTemp
+import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/*
+ * CarPlay / iOS havasında ikinci arayüz (Ayarlar > Geliştirici > Stil > Arayüz).
+ * Renkli, yumuşak bir duvar kağıdı üzerinde yarı saydam "cam" paneller; solda CarPlay'deki gibi
+ * dikey uygulama çubuğu, altta klima şeridi. Klasik Pano düzenine dokunmaz.
+ */
+
+private val tr: Locale = Locale.forLanguageTag("tr-TR")
+
+/** Cam arayüzün renkleri. Duvar kağıdı renkli olduğu için Pano'nun düz renklerinden ayrı tutuluyor. */
+private data class GlassColors(
+    val dark: Boolean,
+    val text: Color,
+    val secondary: Color,
+    val tertiary: Color,
+    val fill: Color,        // cam panel zemini
+    val sheen: Color,       // panelin üst kısmındaki hafif parlama
+    val edgeTop: Color,     // ışık alan üst kenar
+    val edgeBottom: Color,
+    val chip: Color,        // panel içindeki buton zemini
+    val overMap: Color,     // harita üstündeki paneller (daha opak, okunurluk için)
+)
+
+private val DarkGlass = GlassColors(
+    dark = true,
+    text = Color.White,
+    secondary = Color.White.copy(alpha = 0.62f),
+    tertiary = Color.White.copy(alpha = 0.36f),
+    fill = Color.White.copy(alpha = 0.075f),
+    sheen = Color.White.copy(alpha = 0.07f),
+    edgeTop = Color.White.copy(alpha = 0.30f),
+    edgeBottom = Color.White.copy(alpha = 0.05f),
+    chip = Color.White.copy(alpha = 0.12f),
+    overMap = Color(0xC2141418),
+)
+
+private val LightGlass = GlassColors(
+    dark = false,
+    text = Color(0xFF0B0B0C),
+    secondary = Color.Black.copy(alpha = 0.55f),
+    tertiary = Color.Black.copy(alpha = 0.30f),
+    fill = Color.White.copy(alpha = 0.58f),
+    sheen = Color.White.copy(alpha = 0.45f),
+    edgeTop = Color.White.copy(alpha = 0.95f),
+    edgeBottom = Color.White.copy(alpha = 0.30f),
+    chip = Color.Black.copy(alpha = 0.06f),
+    overMap = Color(0xE6FFFFFF),
+)
+
+@Composable
+private fun glass(): GlassColors = if (LocalPano.current.isDark) DarkGlass else LightGlass
+
+/** Liquid Glass benzeri panel: yarı saydam zemin, üstte parlama, ışık alan ince kenar. */
+private fun Modifier.glass(c: GlassColors, shape: Shape = RoundedCornerShape(32.dp)): Modifier =
+    this.clip(shape)
+        .background(c.fill)
+        .background(Brush.verticalGradient(listOf(c.sheen, Color.Transparent)))
+        .border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), shape)
+
+private fun DrawScope.blob(color: Color, alpha: Float, center: Offset, radius: Float) =
+    drawCircle(Brush.radialGradient(listOf(color.copy(alpha = alpha), Color.Transparent), center, radius), radius, center)
+
+private fun DrawScope.wallpaper(dark: Boolean) {
+    val w = size.width
+    val h = size.height
+    if (dark) {
+        drawRect(Brush.linearGradient(listOf(Color(0xFF060918), Color(0xFF110E33), Color(0xFF240C3E)), Offset.Zero, Offset(w, h)))
+        blob(Color(0xFF2F6BFF), 0.42f, Offset(w * 0.18f, h * 0.05f), w * 0.48f)
+        blob(Color(0xFFB44CFF), 0.34f, Offset(w * 0.88f, h * 0.98f), w * 0.46f)
+        blob(Color(0xFF00C2D1), 0.16f, Offset(w * 0.52f, h * 1.08f), w * 0.36f)
+    } else {
+        drawRect(Brush.linearGradient(listOf(Color(0xFFE6ECFB), Color(0xFFEFEAFA), Color(0xFFF8ECF3)), Offset.Zero, Offset(w, h)))
+        blob(Color(0xFF7AA7FF), 0.38f, Offset(w * 0.16f, h * 0.04f), w * 0.46f)
+        blob(Color(0xFFD59BFF), 0.32f, Offset(w * 0.9f, h * 0.96f), w * 0.44f)
+        blob(Color(0xFF7FE3E0), 0.24f, Offset(w * 0.5f, h * 1.1f), w * 0.34f)
+    }
+}
+
+@Composable
+private fun rememberClock(): State<Long> = produceState(System.currentTimeMillis()) {
+    while (true) {
+        value = System.currentTimeMillis()
+        delay(1_000)
+    }
+}
+
+/** CarPlay düzeninin kökü: MainActivity, ayarlarda bu düzen seçiliyse PanoApp yerine bunu çizer. */
+@Composable
+fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit) {
+    val dark = LocalPano.current.isDark
+    Box(Modifier.fillMaxSize().drawBehind { wallpaper(dark) }.windowInsetsPadding(WindowInsets.safeDrawing)) {
+        DesignCanvas {
+            Row(Modifier.fillMaxSize().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Rail(screen, onNavigate, Modifier.width(116.dp).fillMaxHeight())
+                Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        when (screen) {
+                            Screen.Home -> Dashboard(Modifier.fillMaxSize())
+                            Screen.Climate -> ClimateScreen(climate) { onNavigate(Screen.Home) }
+                            Screen.Apps -> AppsScreen { onNavigate(Screen.Home) }
+                            Screen.Settings -> SettingsScreen { onNavigate(Screen.Home) }
+                        }
+                    }
+                    if (screen != Screen.Climate) {
+                        ClimateStrip(climate, { onNavigate(Screen.Climate) }, Modifier.fillMaxWidth().height(92.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────── Sol uygulama çubuğu ─────────────────────────
+
+@Composable
+private fun Rail(current: Screen, onNavigate: (Screen) -> Unit, modifier: Modifier) {
+    val c = glass()
+    val context = LocalContext.current
+    val now by rememberClock()
+    val playing by MediaHub.state.collectAsState()
+    val vehicle = VehicleSource.current()
+    fun toggle(target: Screen) = onNavigate(if (current == target) Screen.Home else target)
+
+    Column(
+        modifier.glass(c, RoundedCornerShape(38.dp)).padding(vertical = 22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            SimpleDateFormat("HH:mm", tr).format(Date(now)),
+            color = c.text, fontSize = 27.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.6).sp,
+        )
+        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            SignalBars(c)
+            Text(
+                "%${vehicle.batteryPercent}", color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 6.dp),
+            )
+        }
+        Spacer(Modifier.height(18.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            RailApp(PanoIcons.Navigation, "Haritalar", listOf(Color(0xFF5AC8FA), Color(0xFF007AFF)), false) { Launch.maps(context) }
+            RailApp(PanoIcons.Music, "Müzik", listOf(Color(0xFFFF6482), Color(0xFFFF2D55)), false) { Launch.music(context, playing?.packageName) }
+            RailApp(PanoIcons.Phone, "Telefon", listOf(Color(0xFF63E07F), Color(0xFF28C840)), false) { Launch.phone(context) }
+            RailApp(PanoIcons.Fan, "Klima", listOf(Color(0xFFFFB340), Color(0xFFFF8A00)), current == Screen.Climate) { toggle(Screen.Climate) }
+            RailApp(PanoIcons.Apps, "Uygulamalar", listOf(Color(0xFF9A9AA0), Color(0xFF48484A)), current == Screen.Apps) { toggle(Screen.Apps) }
+            RailApp(PanoIcons.Sliders, "Ayarlar", listOf(Color(0xFFAEAEB2), Color(0xFF636366)), current == Screen.Settings) { toggle(Screen.Settings) }
+        }
+        Spacer(Modifier.weight(1f))
+        // CarPlay'deki "Dashboard" düğmesi: her zaman ana panoya döner.
+        val home = current == Screen.Home
+        Box(
+            Modifier.size(68.dp).clip(CircleShape)
+                .background(if (home) c.text else c.chip)
+                .clickable(role = Role.Button) { onNavigate(Screen.Home) }
+                .semantics { contentDescription = "Ana pano" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                PanoIcons.Dashboard, contentDescription = null,
+                tint = if (home) (if (c.dark) Color.Black else Color.White) else c.text, modifier = Modifier.size(28.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SignalBars(c: GlassColors) {
+    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Bottom) {
+        listOf(5.dp, 8.dp, 11.dp, 14.dp).forEach { h ->
+            Box(Modifier.width(3.5.dp).height(h).clip(RoundedCornerShape(1.dp)).background(c.secondary))
+        }
+    }
+}
+
+/** CarPlay uygulama ikonu: renk geçişli yumuşak kare. Etkin olanın arkasında cam bir vurgu var. */
+@Composable
+private fun RailApp(icon: ImageVector, label: String, tint: List<Color>, active: Boolean, onClick: () -> Unit) {
+    val c = glass()
+    val tile = RoundedCornerShape(18.dp)
+    Box(
+        Modifier.size(88.dp).clip(RoundedCornerShape(26.dp))
+            .background(if (active) c.chip else Color.Transparent)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.size(64.dp)
+                .shadow(10.dp, tile, ambientColor = tint.last(), spotColor = tint.last())
+                .background(Brush.verticalGradient(tint), tile)
+                .border(0.75.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.45f), Color.White.copy(alpha = 0.05f))), tile),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(32.dp))
+        }
+    }
+}
+
+// ───────────────────────── Ana pano ─────────────────────────
+
+@Composable
+private fun Dashboard(modifier: Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        MapWidget(Modifier.weight(1.25f).fillMaxHeight())
+        VehicleWidget(Modifier.weight(1f).fillMaxHeight())
+        Column(Modifier.weight(0.9f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            ClockWidget(Modifier.weight(0.82f).fillMaxWidth())
+            NowPlayingWidget(Modifier.weight(1.3f).fillMaxWidth())
+            ConsumptionWidget(Modifier.weight(0.5f).fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun MapWidget(modifier: Modifier) {
+    val c = glass()
+    val context = LocalContext.current
+    var granted by remember { mutableStateOf(hasLocationPermission(context)) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        granted = hasLocationPermission(context)
+    }
+    val shape = RoundedCornerShape(32.dp)
+
+    Box(modifier.clip(shape).background(if (c.dark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
+        LiveMap(Modifier.fillMaxSize(), dark = c.dark, showLocation = granted, bottomInset = 0.1f)
+        Box(Modifier.fillMaxSize().clickable(role = Role.Button) { Launch.maps(context) })
+
+        // CarPlay Haritalar'daki arama kutusu
+        Row(
+            Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth().height(60.dp)
+                .clip(RoundedCornerShape(30.dp)).background(c.overMap)
+                .clickable(role = Role.Button) { Launch.maps(context) }
+                .padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(PanoIcons.Search, contentDescription = null, tint = c.secondary, modifier = Modifier.size(22.dp))
+            Text("Nereye gidiyoruz?", color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 12.dp))
+        }
+
+        if (!granted) {
+            Row(
+                Modifier.align(Alignment.BottomEnd).padding(16.dp).height(50.dp).clip(RoundedCornerShape(25.dp))
+                    .background(c.overMap)
+                    .clickable(role = Role.Button) {
+                        permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    }
+                    .padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(PanoIcons.Location, contentDescription = null, tint = linkColor(), modifier = Modifier.size(20.dp))
+                Text("Konumumu göster", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+
+        // OpenStreetMap lisansı gereği atıf görünür kalmalı.
+        Text(
+            "© OpenFreeMap © OpenMapTiles © OpenStreetMap",
+            color = c.secondary, fontSize = 10.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = 12.dp)
+                .clip(RoundedCornerShape(6.dp)).background(c.overMap).padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+
+        // Cam çerçeve: haritayı diğer panellerle aynı ışıklı kenarla sarar.
+        Box(Modifier.matchParentSize().border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), shape))
+    }
+}
+
+@Composable
+private fun VehicleWidget(modifier: Modifier) {
+    val c = glass()
+    val context = LocalContext.current
+    val v = VehicleSource.current()
+
+    Column(modifier.glass(c).padding(28.dp)) {
+        Row(Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("0", color = c.text, fontSize = 80.sp, fontWeight = FontWeight.Light, letterSpacing = (-3).sp, lineHeight = 80.sp)
+                    Text("km/s", color = c.secondary, fontSize = 20.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp, bottom = 12.dp))
+                }
+                Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("PARK", color = Accent.Green, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                    if (v.isPreview) {
+                        Text(
+                            "Önizleme", color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 10.dp).clip(RoundedCornerShape(8.dp)).background(c.chip)
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
+                }
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("MENZİL", color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("${v.rangeKm}", color = c.text, fontSize = 44.sp, fontWeight = FontWeight.Medium, letterSpacing = (-1.2).sp, lineHeight = 44.sp)
+                    Text("km", color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+                }
+                Box(Modifier.padding(top = 10.dp).width(150.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.chip)) {
+                    Box(
+                        Modifier.fillMaxHeight().fillMaxWidth(v.batteryPercent / 100f).clip(RoundedCornerShape(3.dp))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFF30D158), Color(0xFF63E6A0)))),
+                    )
+                }
+                Text("%${v.batteryPercent}", color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+
+        CarIllustration(Modifier.weight(1f).fillMaxWidth().padding(vertical = 10.dp), dark = c.dark, background = Color.Transparent)
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            val notYet = { Launch.notConnectedYet(context) }
+            GlassAction(if (v.locked) PanoIcons.Lock else PanoIcons.Unlock, if (v.locked) "Kilitli" else "Açık", notYet)
+            GlassAction(PanoIcons.Trunk, "Bagaj", notYet)
+            GlassAction(PanoIcons.Bolt, "Şarj", notYet)
+            GlassAction(PanoIcons.Mirror, "Aynalar", notYet)
+        }
+    }
+}
+
+@Composable
+private fun GlassAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+    val c = glass()
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.size(66.dp).clip(CircleShape).background(c.chip)
+                .border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), CircleShape)
+                .clickable(role = Role.Button, onClick = onClick)
+                .semantics { contentDescription = label },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = c.text, modifier = Modifier.size(26.dp))
+        }
+        Text(label, color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+/** iOS takvim widget'ı havasında: kırmızı gün adı, büyük gün numarası, sağda saat. */
+@Composable
+private fun ClockWidget(modifier: Modifier) {
+    val c = glass()
+    val now by rememberClock()
+    val date = Date(now)
+    Row(modifier.glass(c).padding(horizontal = 26.dp, vertical = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                SimpleDateFormat("EEEE", tr).format(date).uppercase(tr),
+                color = Accent.Red, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+            )
+            Text(SimpleDateFormat("d", tr).format(date), color = c.text, fontSize = 60.sp, fontWeight = FontWeight.Light, lineHeight = 62.sp)
+            Text(SimpleDateFormat("MMMM", tr).format(date), color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        }
+        Text(
+            SimpleDateFormat("HH:mm", tr).format(date),
+            color = c.text, fontSize = 54.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-2).sp,
+        )
+    }
+}
+
+@Composable
+private fun NowPlayingWidget(modifier: Modifier) {
+    val c = glass()
+    val context = LocalContext.current
+    val playing by MediaHub.state.collectAsState()
+    val now by rememberClock()
+    val p = playing
+
+    Column(modifier.glass(c).padding(24.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(96.dp).shadow(12.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFFFF6482), Color(0xFFBF5AF2))))
+                    .clickable(role = Role.Button) { Launch.music(context, p?.packageName) },
+                contentAlignment = Alignment.Center,
+            ) {
+                val art = p?.art
+                if (art != null) {
+                    Image(art.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                } else {
+                    Icon(PanoIcons.Music, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
+                }
+            }
+            Column(Modifier.weight(1f).padding(start = 18.dp)) {
+                Text(
+                    if (p?.isPlaying == true) "ŞİMDİ ÇALIYOR" else "MÜZİK",
+                    color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
+                )
+                Text(
+                    p?.title ?: "Müzik çalmıyor", color = c.text, fontSize = 21.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
+                )
+                if (p != null) {
+                    Text(p.artist, color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                } else if (!MediaHub.hasAccess(context)) {
+                    Text(
+                        "Bildirim erişimi ver", color = linkColor(), fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { Launch.notificationAccess(context) },
+                    )
+                } else {
+                    Text("Kapağa dokunup uygulamayı aç", color = c.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        if (p != null) {
+            val position = now.let {
+                if (p.isPlaying && p.positionUpdatedAt > 0) {
+                    p.positionMs + ((SystemClock.elapsedRealtime() - p.positionUpdatedAt) * p.speed).toLong()
+                } else p.positionMs
+            }
+            val progress = if (p.durationMs > 0) (position.toFloat() / p.durationMs).coerceIn(0f, 1f) else 0f
+            Box(Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)).background(c.chip)) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(progress).clip(RoundedCornerShape(3.dp)).background(c.text))
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 14.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RoundIconButton(PanoIcons.Previous, "Önceki", { MediaHub.previous() }, Color.Transparent, c.text, size = 56.dp, iconSize = 28.dp)
+                RoundIconButton(
+                    if (p.isPlaying) PanoIcons.Pause else PanoIcons.Play,
+                    if (p.isPlaying) "Duraklat" else "Oynat",
+                    { MediaHub.playPause() }, c.chip, c.text, size = 64.dp, iconSize = 30.dp,
+                )
+                RoundIconButton(PanoIcons.Next, "Sonraki", { MediaHub.next() }, Color.Transparent, c.text, size = 56.dp, iconSize = 28.dp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConsumptionWidget(modifier: Modifier) {
+    val c = glass()
+    val v = VehicleSource.current()
+    Row(modifier.glass(c).padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
+                .background(Brush.verticalGradient(listOf(Color(0xFF63E07F), Color(0xFF28C840)))),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(PanoIcons.Bolt, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+        }
+        Text("Tüketim", color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 14.dp).weight(1f))
+        Text(decimal(v.consumptionKwh100), color = c.text, fontSize = 28.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.6).sp)
+        Text("kWh/100", color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp))
+    }
+}
+
+// ───────────────────────── Alt klima şeridi ─────────────────────────
+
+@Composable
+private fun ClimateStrip(climate: ClimateState, onOpen: () -> Unit, modifier: Modifier) {
+    val c = glass()
+    Row(modifier.glass(c, RoundedCornerShape(30.dp)).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        TempControl(climate.driver, climate.isOff, "Sürücü", { climate.changeDriver(-0.5f) }, { climate.changeDriver(0.5f) })
+        Row(
+            Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GlassPill("Otomatik", climate.auto) { climate.auto = !climate.auto }
+            GlassPill("A/C", climate.ac) { climate.ac = !climate.ac }
+            Row(
+                Modifier.height(58.dp).clip(RoundedCornerShape(29.dp)).background(c.chip),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RoundIconButton(PanoIcons.Minus, "Fanı azalt", { climate.setFanLevel(climate.fan - 1) }, Color.Transparent, c.text, size = 58.dp, iconSize = 20.dp)
+                Icon(PanoIcons.Fan, contentDescription = null, tint = c.text, modifier = Modifier.size(24.dp))
+                Text(
+                    if (climate.isOff) "Kapalı" else "${climate.fan}",
+                    color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center, modifier = Modifier.width(64.dp),
+                )
+                RoundIconButton(PanoIcons.Plus, "Fanı artır", { climate.setFanLevel(climate.fan + 1) }, Color.Transparent, c.text, size = 58.dp, iconSize = 20.dp)
+            }
+            RoundIconButton(PanoIcons.ChevronUp, "Klima ayrıntıları", onOpen, c.chip, c.text, size = 58.dp, iconSize = 22.dp)
+        }
+        TempControl(climate.passenger, climate.isOff, "Yolcu", { climate.changePassenger(-0.5f) }, { climate.changePassenger(0.5f) })
+    }
+}
+
+@Composable
+private fun TempControl(value: Float, off: Boolean, who: String, onDown: () -> Unit, onUp: () -> Unit) {
+    val c = glass()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        RoundIconButton(PanoIcons.ChevronLeft, "$who sıcaklığını düşür", onDown, c.chip, c.text, size = 56.dp, iconSize = 22.dp)
+        Text(
+            if (off) "—" else shortTemp(value),
+            color = c.text, fontSize = 34.sp, fontWeight = FontWeight.Normal, letterSpacing = (-1).sp,
+            textAlign = TextAlign.Center, modifier = Modifier.width(100.dp),
+        )
+        RoundIconButton(PanoIcons.ChevronRight, "$who sıcaklığını artır", onUp, c.chip, c.text, size = 56.dp, iconSize = 22.dp)
+    }
+}
+
+@Composable
+private fun GlassPill(text: String, on: Boolean, onClick: () -> Unit) {
+    val c = glass()
+    Box(
+        Modifier.height(58.dp).clip(RoundedCornerShape(29.dp))
+            .background(if (on) linkColor() else c.chip)
+            .clickable(role = Role.Switch, onClick = onClick)
+            .padding(horizontal = 26.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = if (on) Color.White else c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
