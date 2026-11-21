@@ -10,13 +10,43 @@ import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+import app.pano.launcher.navigation.NavHub
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Android'in medya oturumlarını okuyabilmek için gereken boş bildirim dinleyicisi. */
-class MediaListenerService : NotificationListenerService()
+/**
+ * Bildirim dinleyicisi. Varlığı, Android'in medya oturumlarını okumamıza izin verir
+ * ([MediaHub]); ayrıca navigasyon uygulamalarının bildirimlerini [NavHub]'a aktarır.
+ */
+class MediaListenerService : NotificationListenerService() {
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        // Navigasyon zaten başlamışsa mevcut bildirimi hemen al.
+        val active = try {
+            activeNotifications
+        } catch (_: Exception) {
+            null
+        }
+        active?.filter { NavHub.isNavPackage(it.packageName) }?.forEach { NavHub.onPosted(this, it) }
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        NavHub.clear()
+    }
+
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        if (sbn != null && NavHub.isNavPackage(sbn.packageName)) NavHub.onPosted(this, sbn)
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        if (sbn != null && NavHub.isNavPackage(sbn.packageName)) NavHub.onRemoved(sbn)
+    }
+}
 
 data class NowPlaying(
     val title: String,
