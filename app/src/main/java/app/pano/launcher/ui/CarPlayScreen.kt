@@ -466,10 +466,12 @@ private fun Dashboard(modifier: Modifier) {
         VehicleWidget(Modifier.weight(1f).fillMaxHeight())
         Column(Modifier.weight(0.9f).fillMaxHeight()) {
             if (parked > 0.001f) {
-                ClockWidget(Modifier.weight(0.82f * parked).fillMaxWidth().graphicsLayer { alpha = parked }.clipToBounds())
+                ClockWidget(Modifier.weight(0.56f * parked).fillMaxWidth().graphicsLayer { alpha = parked }.clipToBounds())
+                Spacer(Modifier.height(18.dp * parked))
+                TyreBatteryWidget(Modifier.weight(0.74f * parked).fillMaxWidth().graphicsLayer { alpha = parked }.clipToBounds())
                 Spacer(Modifier.height(18.dp * parked))
             }
-            NowPlayingWidget(Modifier.weight(1.3f).fillMaxWidth())
+            NowPlayingWidget(Modifier.weight(1.2f).fillMaxWidth())
             if (parked > 0.001f) {
                 Spacer(Modifier.height(18.dp * parked))
                 ConsumptionWidget(Modifier.height(IslandHeight * parked).fillMaxWidth().graphicsLayer { alpha = parked }.clipToBounds())
@@ -987,46 +989,123 @@ private fun ClockWidget(modifier: Modifier) {
     val weather by WeatherHub.state.collectAsState()
     val date = Date(now)
     val w = weather
-    if (w != null) {
-        Row(modifier.glass(c).padding(horizontal = 26.dp, vertical = 22.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    SimpleDateFormat("EEEE", tr).format(date).uppercase(tr),
-                    color = Accent.Red, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
-                )
-                Text(SimpleDateFormat("d", tr).format(date), color = c.text, fontSize = 60.sp, fontWeight = FontWeight.Light, lineHeight = 62.sp)
-                Text(SimpleDateFormat("MMMM", tr).format(date), color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(weatherIcon(w), contentDescription = null, tint = weatherTint(w), modifier = Modifier.size(38.dp))
-                    Text(
-                        deg(w.temperatureC), color = c.text, fontSize = 52.sp, fontWeight = FontWeight.Light,
-                        letterSpacing = (-1.5).sp, modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
-                Text(w.description, color = c.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    "Y:${deg(w.highC)}  D:${deg(w.lowC)}",
-                    color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
-        return
-    }
-    Row(modifier.glass(c).padding(horizontal = 26.dp, vertical = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+    // Lastik kartına yer açmak için tek satırlık sıkı düzen: solda tarih, sağda hava ya da saat.
+    Row(modifier.glass(c).padding(horizontal = 26.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(
                 SimpleDateFormat("EEEE", tr).format(date).uppercase(tr),
-                color = Accent.Red, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+                color = Accent.Red, fontSize = 13.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
             )
-            Text(SimpleDateFormat("d", tr).format(date), color = c.text, fontSize = 60.sp, fontWeight = FontWeight.Light, lineHeight = 62.sp)
-            Text(SimpleDateFormat("MMMM", tr).format(date), color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(SimpleDateFormat("d", tr).format(date), color = c.text, fontSize = 44.sp, fontWeight = FontWeight.Light, lineHeight = 46.sp)
+                Text(
+                    SimpleDateFormat("MMMM", tr).format(date), color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(start = 8.dp, bottom = 7.dp),
+                )
+            }
         }
-        Text(
-            SimpleDateFormat("HH:mm", tr).format(date),
-            color = c.text, fontSize = 54.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-2).sp,
-        )
+        if (w != null) {
+            Icon(weatherIcon(w), contentDescription = null, tint = weatherTint(w), modifier = Modifier.size(34.dp))
+            Text(
+                deg(w.temperatureC), color = c.text, fontSize = 44.sp, fontWeight = FontWeight.Light,
+                letterSpacing = (-1.5).sp, modifier = Modifier.padding(start = 8.dp),
+            )
+            Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(start = 12.dp).widthIn(max = 120.dp)) {
+                Text(w.description, color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("Y:${deg(w.highC)}  D:${deg(w.lowC)}", color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            }
+        } else {
+            Text(
+                SimpleDateFormat("HH:mm", tr).format(date),
+                color = c.text, fontSize = 46.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-2).sp,
+            )
+        }
+    }
+}
+
+/**
+ * Lastik basınçları (üstten araç şeması, köşelerde kPa) ve batarya. Veri yolundan gelmeyen
+ * değer "—" kalır; BYD yokken lastik değeri hiç yoktur, batarya ise "Önizleme" etiketlidir.
+ */
+@Composable
+private fun TyreBatteryWidget(modifier: Modifier) {
+    val c = glass()
+    val v by VehicleHub.state.collectAsState()
+    val t = v.tyresKpa
+    Row(modifier.glass(c).padding(horizontal = 22.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("LASTİKLER", color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                Text("kPa", color = c.secondary.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 6.dp))
+            }
+            Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TyreValue(t?.frontLeft, c)
+                    TyreValue(t?.rearLeft, c)
+                }
+                CarTopView(c, Modifier.padding(horizontal = 12.dp).width(34.dp).height(70.dp))
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TyreValue(t?.frontRight, c)
+                    TyreValue(t?.rearRight, c)
+                }
+            }
+        }
+        Box(Modifier.padding(horizontal = 16.dp).width(1.dp).fillMaxHeight(0.75f).background(c.chip))
+        Column(Modifier.width(96.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("BATARYA", color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+            BatteryGlyph(v.batteryPercent, c, Modifier.padding(top = 10.dp).width(58.dp).height(26.dp))
+            Text(
+                v.batteryPercent?.let { "%$it" } ?: "—", color = c.text, fontSize = 26.sp, fontWeight = FontWeight.Medium,
+                letterSpacing = (-0.5).sp, modifier = Modifier.padding(top = 6.dp),
+            )
+            if (v.isPreview) {
+                Text("Önizleme", color = c.secondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TyreValue(kpa: Int?, c: GlassColors) {
+    Text(kpa?.toString() ?: "—", color = if (kpa != null) c.text else c.secondary, fontSize = 22.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.3).sp)
+}
+
+/** Üstten bakışta sade araç: gövde çizgisi ve dört tekerlek. */
+@Composable
+private fun CarTopView(c: GlassColors, modifier: Modifier) {
+    Box(modifier.drawWithCache {
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.6.dp.toPx())
+        val wheelW = size.width * 0.2f
+        val wheelH = size.height * 0.2f
+        val body = androidx.compose.ui.geometry.Size(size.width - wheelW, size.height)
+        val r = androidx.compose.ui.geometry.CornerRadius(size.width * 0.35f)
+        onDrawBehind {
+            val wheel = androidx.compose.ui.geometry.Size(wheelW, wheelH)
+            val wr = androidx.compose.ui.geometry.CornerRadius(wheelW / 2)
+            for (y in listOf(size.height * 0.16f, size.height * 0.66f)) {
+                drawRoundRect(c.secondary, Offset(0f, y), wheel, wr)
+                drawRoundRect(c.secondary, Offset(size.width - wheelW, y), wheel, wr)
+            }
+            drawRoundRect(c.secondary, Offset(wheelW / 2, 0f), body, r, style = stroke)
+            // Ön cam çizgisi: hangi ucun ön olduğu anlaşılsın.
+            drawLine(c.secondary, Offset(wheelW, size.height * 0.3f), Offset(size.width - wheelW, size.height * 0.3f), 1.6.dp.toPx())
+        }
+    })
+}
+
+/** Batarya simgesi; doluluk yüzdeye göre (bilinmiyorsa boş). */
+@Composable
+private fun BatteryGlyph(percent: Int?, c: GlassColors, modifier: Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(7.dp))
+                .border(1.6.dp, c.secondary, RoundedCornerShape(7.dp)).padding(3.dp),
+        ) {
+            val p = (percent ?: 0) / 100f
+            val fill = if ((percent ?: 100) <= 20) listOf(Color(0xFFFF9F0A), Color(0xFFFF453A)) else listOf(Color(0xFF30D158), Color(0xFF63E6A0))
+            Box(Modifier.fillMaxHeight().fillMaxWidth(p).clip(RoundedCornerShape(4.dp)).background(Brush.horizontalGradient(fill)))
+        }
+        Box(Modifier.padding(start = 2.dp).width(3.dp).height(10.dp).clip(RoundedCornerShape(1.5.dp)).background(c.secondary))
     }
 }
 
