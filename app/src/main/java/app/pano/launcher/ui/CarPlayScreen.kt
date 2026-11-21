@@ -85,6 +85,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
+import app.pano.launcher.RecentApps
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import app.pano.launcher.PanelHost
 import androidx.compose.ui.layout.boundsInWindow
@@ -492,20 +495,26 @@ private fun DrivingGate(title: String, onHome: () -> Unit, content: @Composable 
     }
 }
 
-/** Haritanın altındaki cam ada: favori uygulamalar tek satırda, dokununca açılır. */
+/**
+ * Haritanın altındaki cam ada: önce favoriler, ince bir çizgiden sonra son kullanılanlar.
+ * Dokununca uygulama harita panelinde açılır (destekleniyorsa); basılı tutunca küçük bir menü
+ * çıkar: tam ekran aç, favorilere ekle / çıkar.
+ */
 @Composable
 private fun FavoritesIsland(modifier: Modifier) {
     val c = glass()
     val context = LocalContext.current
     FavoritesStore.load(context)
     val favorites by FavoritesStore.state
+    val recentAll by RecentApps.state
+    val recents = recentAll.filter { r -> favorites.none { it.packageName == r.packageName } }
 
     Row(
         modifier.glass(c).padding(horizontal = 22.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        if (favorites.isEmpty()) {
+        if (favorites.isEmpty() && recents.isEmpty()) {
             Icon(PanoIcons.Star, contentDescription = null, tint = c.tertiary, modifier = Modifier.padding(start = 6.dp).size(20.dp))
             Text(
                 "Uygulamalar'da bir ikona uzun basarak favori ekle",
@@ -513,23 +522,75 @@ private fun FavoritesIsland(modifier: Modifier) {
                 maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
         } else {
-            favorites.forEach { app ->
-                key(app.packageName, app.className) {
-                    val source = rememberLaunchSource()
-                    AppIcon(
-                        app.packageName, app.className, 64.dp,
-                        Modifier.pressScale().launchSource(source).clip(RoundedCornerShape(23)).semantics { contentDescription = app.label }
-                            .clickable(role = Role.Button) {
-                                // Destekleniyorsa launcher'dan çıkmadan harita panelinde açılır.
-                                if (!PanelHost.open(context, app.packageName, app.className)) {
-                                    Launch.app(context, app.packageName, app.className, source.anchor())
-                                }
-                            },
-                    )
+            favorites.forEach { app -> key("f", app.packageName, app.className) { IslandApp(app, favorite = true) } }
+            if (favorites.isNotEmpty() && recents.isNotEmpty()) {
+                Box(Modifier.width(1.dp).height(44.dp).background(c.secondary.copy(alpha = 0.3f)))
+            }
+            recents.forEach { app -> key("r", app.packageName, app.className) { IslandApp(app, favorite = false) } }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun IslandApp(app: app.pano.launcher.settings.FavoriteApp, favorite: Boolean) {
+    val c = glass()
+    val context = LocalContext.current
+    val source = rememberLaunchSource()
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        AppIcon(
+            app.packageName, app.className, 64.dp,
+            Modifier.pressScale().launchSource(source).clip(RoundedCornerShape(23)).semantics { contentDescription = app.label }
+                .combinedClickable(
+                    role = Role.Button,
+                    onLongClick = { menu = true },
+                ) {
+                    // Destekleniyorsa launcher'dan çıkmadan harita panelinde açılır.
+                    if (!PanelHost.open(context, app.packageName, app.className)) {
+                        Launch.app(context, app.packageName, app.className, source.anchor())
+                    }
+                },
+        )
+        if (menu) {
+            androidx.compose.ui.window.Popup(
+                alignment = Alignment.BottomStart,
+                offset = androidx.compose.ui.unit.IntOffset(0, -90),
+                onDismissRequest = { menu = false },
+                properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+            ) {
+                Column(
+                    Modifier.width(240.dp).shadow(18.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
+                        .background(if (c.dark) Color(0xF2232326) else Color(0xF7FFFFFF)).padding(8.dp),
+                ) {
+                    Text(app.label, color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
+                    IslandMenuItem("Tam ekran aç") {
+                        menu = false
+                        Launch.app(context, app.packageName, app.className, source.anchor())
+                    }
+                    IslandMenuItem(if (favorite) "Favorilerden çıkar" else "Favorilere ekle") {
+                        menu = false
+                        val r = FavoritesStore.toggle(app)
+                        if (r == FavoritesStore.Result.Full) {
+                            android.widget.Toast.makeText(context, "Favoriler dolu", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun IslandMenuItem(text: String, onClick: () -> Unit) {
+    val c = glass()
+    Text(
+        text, color = c.text, fontSize = 18.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(14.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 16.dp),
+    )
 }
 
 @Composable

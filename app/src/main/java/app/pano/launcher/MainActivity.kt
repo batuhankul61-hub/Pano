@@ -73,6 +73,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Kullanıcı bildirim erişimini yeni verdiyse müzik takibi burada başlar.
         MediaHub.start(this)
+        // Haritanın altındaki adada son kullanılanlar.
+        RecentApps.refresh(this)
         // Hava durumu 15 dakikada bir yenilenir; döngü zaten çalışıyorsa bir şey yapmaz.
         WeatherHub.start(this)
         // Araç verisi: BYD veri yolu, yoksa GPS hızı, o da yoksa önizleme.
