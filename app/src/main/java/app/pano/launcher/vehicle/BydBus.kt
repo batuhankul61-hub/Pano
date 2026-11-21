@@ -255,6 +255,30 @@ internal object BydSignals {
     /** Onda bir psi → kPa. Veri yolu 384 = 38,4 psi = 265 kPa taşıyor. */
     private const val PSI_TENTHS_TO_KPA = 0.6894757f
 
+    /**
+     * Ortalama elektrik tüketimi (kWh/100 km) ve hangi pencereye ait olduğu.
+     * BYD'nin `BYDAutoStatisticDevice` sınıfı bunları `getDouble` ile okuyor:
+     * `getLastElecConPHMValue` (son 50 km) → `getTotalElecConPHMValue` (toplam ortalama).
+     * Makul aralık dışı değerler (0 = henüz hesaplanmadı) bilinmiyor sayılır.
+     */
+    fun consumption(): Consumption? {
+        val recent = BydBus.readDouble("Statistic", "STATISTIC_LAST_ELEC_CON_PHM")
+        val total = BydBus.readDouble("Statistic", "STATISTIC_TOTAL_ELEC_CON_PHM")
+        if (!loggedConsumption) {
+            // Birim ve ölçek araçta henüz doğrulanmadı; ilk okumayı kayda yaz.
+            loggedConsumption = true
+            val unit = BydBus.readInt("Statistic", "STATISTIC_TOTAL_ELEC_CON_PHM_UNIT")
+            val instant = BydBus.readDouble("Statistic", "STATISTIC_INSTANT_EV_CONSUME")
+            Log.i("BydBus", "tüketim ham: son50=$recent toplam=$total anlık=$instant birim=$unit")
+        }
+        recent?.takeIf { it in CONSUMPTION_RANGE }?.let { return Consumption(it.toFloat(), recentWindow = true) }
+        total?.takeIf { it in CONSUMPTION_RANGE }?.let { return Consumption(it.toFloat(), recentWindow = false) }
+        return null
+    }
+
+    private val CONSUMPTION_RANGE = 1.0..60.0
+    @Volatile private var loggedConsumption = false
+
     fun tyresKpa(): TyrePressures? {
         fun corner(c: String) = BydBus.readInt("Instrument", "INSTRUMENT_2IN1_${c}_TYRE_PRESSURE")
             ?.takeIf { it > 0 }?.let { Math.round(it * PSI_TENTHS_TO_KPA) }

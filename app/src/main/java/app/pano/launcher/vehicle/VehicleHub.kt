@@ -30,6 +30,12 @@ enum class Gear(val label: String) { P("Park"), R("Geri"), N("Boş"), D("Sürü�
 /** Lastik basınçları (kPa); her köşe ayrı ayrı bilinmiyor olabilir. */
 data class TyrePressures(val frontLeft: Int?, val frontRight: Int?, val rearLeft: Int?, val rearRight: Int?)
 
+/**
+ * Ortalama tüketim (kWh/100 km). [recentWindow] true ise son 50 km'nin ortalaması,
+ * false ise aracın tuttuğu toplam ortalama.
+ */
+data class Consumption(val kwh100: Float, val recentWindow: Boolean)
+
 /** Hız verisinin nereden geldiği. */
 enum class SpeedSource { Vehicle, Gps, None }
 
@@ -52,8 +58,10 @@ data class VehicleState(
     val insideTempC: Int? = null,
     val tyresKpa: TyrePressures? = null,
     val locked: Boolean? = null,
-    val consumptionKwh100: Float? = null,
-)
+    val consumption: Consumption? = null,
+) {
+    val consumptionKwh100: Float? get() = consumption?.kwh100
+}
 
 /**
  * Araç verilerinin tek kaynağı ([NavHub]/[WeatherHub] örüntüsü).
@@ -79,7 +87,7 @@ object VehicleHub {
         batteryPercent = 78,
         rangeKm = 412,
         locked = true,
-        consumptionKwh100 = 14.8f,
+        consumption = Consumption(14.8f, recentWindow = true),
     )
 
     private val _state = MutableStateFlow(PREVIEW)
@@ -119,10 +127,14 @@ object VehicleHub {
         val outsideTempC: Int? = null,
         val insideTempC: Int? = null,
         val tyresKpa: TyrePressures? = null,
+        val consumption: Consumption? = null,
     )
 
     private fun readSlow() = runCatching {
-        SlowReadings(BydSignals.outsideTempC(), BydSignals.insideTempC(), BydSignals.tyresKpa())
+        SlowReadings(
+            BydSignals.outsideTempC(), BydSignals.insideTempC(), BydSignals.tyresKpa(),
+            runCatching { BydSignals.consumption() }.getOrNull(),
+        )
     }.getOrDefault(SlowReadings())
 
     private fun compose(byd: Boolean, slow: SlowReadings): VehicleState {
@@ -149,6 +161,7 @@ object VehicleHub {
             outsideTempC = slow.outsideTempC,
             insideTempC = slow.insideTempC,
             tyresKpa = slow.tyresKpa,
+            consumption = slow.consumption,
         )
     }
 

@@ -1118,7 +1118,19 @@ private fun ConsumptionWidget(modifier: Modifier) {
         ) {
             Icon(PanoIcons.Bolt, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
         }
-        Text("Tüketim", color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 14.dp).weight(1f))
+        Column(Modifier.padding(start = 14.dp).weight(1f)) {
+            Text("Tüketim", color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            // Değerin hangi pencereye ait olduğu; önizlemede açıkça "Önizleme".
+            val scope = when {
+                v.isPreview -> "Önizleme"
+                v.consumption?.recentWindow == true -> "Son 50 km"
+                v.consumption != null -> "Ortalama"
+                else -> null
+            }
+            if (scope != null) {
+                Text(scope, color = c.secondary.copy(alpha = 0.75f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
+            }
+        }
         Text(v.consumptionKwh100?.let(::decimal) ?: "—", color = c.text, fontSize = 28.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.6).sp)
         Text("kWh/100", color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp))
     }
