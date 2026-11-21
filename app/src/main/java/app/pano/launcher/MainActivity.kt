@@ -34,6 +34,7 @@ import app.pano.launcher.ui.CarPlayApp
 import app.pano.launcher.ui.SettingsScreen
 import app.pano.launcher.ui.theme.PanoTheme
 import app.pano.launcher.vehicle.ClimateState
+import app.pano.launcher.weather.WeatherHub
 
 enum class Screen { Home, Climate, Apps, Settings }
 
@@ -60,6 +61,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Kullanıcı bildirim erişimini yeni verdiyse müzik takibi burada başlar.
         MediaHub.start(this)
+        // Hava durumu 15 dakikada bir yenilenir; döngü zaten çalışıyorsa bir şey yapmaz.
+        WeatherHub.start(this)
     }
 }
 
