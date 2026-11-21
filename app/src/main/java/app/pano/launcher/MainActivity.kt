@@ -65,7 +65,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun PanoApp(screen: Screen, onNavigate: (Screen) -> Unit) {
-    val climate = remember { ClimateState() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val climate = remember { app.pano.launcher.vehicle.ClimateStore.load(context) }
 
     // Launcher olduğumuz için geri tuşu uygulamadan çıkmaz, ana sayfaya döner.
     BackHandler { onNavigate(Screen.Home) }
