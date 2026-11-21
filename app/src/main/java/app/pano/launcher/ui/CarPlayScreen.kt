@@ -1448,6 +1448,7 @@ private fun DockItemView(control: DockControl, climate: ClimateState, onNavigate
         DockControl.Navigation -> icon(PanoIcons.Navigation, "Navigasyon") { Launch.maps(context) }
         DockControl.Music -> icon(PanoIcons.Music, "Müzik") { Launch.music(context, playing?.packageName) }
         DockControl.Phone -> icon(PanoIcons.Phone, "Telefon") { Launch.phone(context) }
+        DockControl.Voice -> icon(PanoIcons.Mic, "Sesli asistan") { Launch.voiceAssistant(context) }
         DockControl.Apps -> icon(PanoIcons.Apps, "Uygulamalar") { onNavigate(Screen.Apps) }
         DockControl.CarSettings -> icon(PanoIcons.Car, "Araç ayarları") { Launch.carSettings(context) }
         DockControl.PanoSettings -> icon(PanoIcons.Sliders, "Pano ayarları") { onNavigate(Screen.Settings) }
@@ -1558,6 +1559,7 @@ private fun dockIcon(control: DockControl): ImageVector = when (control) {
     DockControl.Navigation -> PanoIcons.Navigation
     DockControl.Music -> PanoIcons.Music
     DockControl.Phone -> PanoIcons.Phone
+    DockControl.Voice -> PanoIcons.Mic
     DockControl.Apps -> PanoIcons.Apps
     DockControl.CarSettings -> PanoIcons.Car
     DockControl.PanoSettings -> PanoIcons.Sliders

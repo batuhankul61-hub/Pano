@@ -60,6 +60,9 @@ object PanoIcons {
             "M13.4 12.8c2.7.9 5.3 3.6 4 5.8-1.2 2.1-4.6.4-4.9-4.6" +
             "M10.6 12.8c-2.1 1.9-5.7 2.9-7 .6-1.2-2.1 2-4.1 6.5-1.9",
     )
+    /** Mikrofon: sesli asistan. */
+    val Mic = line("mic", "M9 6.5a3 3 0 0 1 6 0V12a3 3 0 0 1-6 0zM5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3")
+
     val Sliders = line("sliders", "M4 7h9M17 7h3M4 17h3M11 17h9" + circle(15f, 7f, 2f) + circle(9f, 17f, 2f))
     val Lock = line("lock", "M7 10.5h10a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6.5a2 2 0 0 1 2-2zM8 10.5V8a4 4 0 0 1 8 0v2.5")
     val Unlock = line("unlock", "M7 10.5h10a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6.5a2 2 0 0 1 2-2zM8 10.5V8a4 4 0 0 1 7.6-1.8")

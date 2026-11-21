@@ -9,6 +9,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
+import android.speech.RecognizerIntent
+import android.util.Log
 import android.view.View
 import android.widget.Toast
 
@@ -100,6 +102,29 @@ object Launch {
     fun carSettings(context: Context) {
         val launch = launchable(context, CAR_SETTINGS_APPS)
         if (launch != null) start(context, launch, "Araç ayarları açılamadı") else settings(context)
+    }
+
+    /** BYD'nin kendi sesli asistanı (direksiyondaki ses düğmesinin açtığı uygulama). */
+    private const val BYD_VOICE = "com.byd.vrassistant"
+
+    /**
+     * Sesli asistanı açar. Sıra: BYD asistanının açılış ekranı → aynı paketin sesli komut /
+     * asistan ekranı → Android'in standart sesli komutu (`ACTION_VOICE_COMMAND`) → eller serbest
+     * sesli arama (`RecognizerIntent`) → genel asistan (`ACTION_ASSIST`).
+     */
+    fun voiceAssistant(context: Context, anchor: LaunchAnchor? = null) {
+        val candidates = listOfNotNull(
+            context.packageManager.getLaunchIntentForPackage(BYD_VOICE),
+            Intent(Intent.ACTION_VOICE_COMMAND).setPackage(BYD_VOICE),
+            Intent(Intent.ACTION_ASSIST).setPackage(BYD_VOICE),
+            Intent(Intent.ACTION_VOICE_COMMAND),
+            Intent(RecognizerIntent.ACTION_VOICE_SEARCH_HANDS_FREE),
+            Intent(Intent.ACTION_ASSIST),
+        )
+        val launch = candidates.firstOrNull { resolves(context, it) }
+        Log.i("Launch", "sesli asistan: ${launch?.let { it.`package` ?: it.action } ?: "yok"}")
+        if (launch != null) start(context, launch, "Sesli asistan açılamadı", anchor)
+        else Toast.makeText(context, "Bu araçta sesli asistan bulunamadı", Toast.LENGTH_SHORT).show()
     }
 
     fun notificationAccess(context: Context) =

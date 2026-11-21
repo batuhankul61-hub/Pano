@@ -25,6 +25,7 @@ enum class DockControl(val label: String, val group: String) {
     Navigation("Navigasyon", "Gezinme"),
     Music("Müzik", "Gezinme"),
     Phone("Telefon", "Gezinme"),
+    Voice("Sesli asistan", "Gezinme"),
     Apps("Uygulamalar", "Gezinme"),
     CarSettings("Araç ayarları", "Ayarlar"),
     PanoSettings("Pano ayarları", "Ayarlar"),
@@ -37,8 +38,12 @@ object DockStore {
 
     val DEFAULT: Set<DockControl> = setOf(
         DockControl.Home, DockControl.Temperature, DockControl.Auto, DockControl.AC, DockControl.Fan,
-        DockControl.ClimateDetail, DockControl.PassengerTemperature, DockControl.CarSettings,
+        DockControl.ClimateDetail, DockControl.PassengerTemperature, DockControl.Voice, DockControl.CarSettings,
     )
+
+    /** Sonradan eklenen kontroller; kayıtlı seçimi olan kullanıcıya da bir kez eklenir. */
+    private val ADDED_LATER = listOf(DockControl.Voice)
+    private const val KEY_OFFERED = "offered"
 
     private var prefs: SharedPreferences? = null
     private val _state = mutableStateOf(DEFAULT)
@@ -48,8 +53,17 @@ object DockStore {
         if (prefs != null) return
         val p = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs = p
-        val saved = p.getString(KEY, null) ?: return
-        _state.value = saved.split(',').mapNotNull { name -> DockControl.entries.firstOrNull { it.name == name } }.toSet()
+        val saved = p.getString(KEY, null)
+        if (saved != null) {
+            _state.value = saved.split(',').mapNotNull { name -> DockControl.entries.firstOrNull { it.name == name } }.toSet()
+        }
+        // Yeni kontrolü bir kez göster; kullanıcı kaldırırsa bir daha eklenmez.
+        val offered = p.getString(KEY_OFFERED, "").orEmpty().split(',').toSet()
+        val fresh = ADDED_LATER.filter { it.name !in offered }
+        if (fresh.isNotEmpty()) {
+            if (saved != null) save(_state.value + fresh)
+            p.edit().putString(KEY_OFFERED, (offered + fresh.map { it.name }).filter { it.isNotEmpty() }.joinToString(",")).apply()
+        }
     }
 
     fun toggle(control: DockControl) = save(if (control in _state.value) _state.value - control else _state.value + control)
