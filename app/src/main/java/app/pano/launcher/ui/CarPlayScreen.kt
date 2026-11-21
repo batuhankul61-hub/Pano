@@ -8,6 +8,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -57,6 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
+import app.pano.launcher.settings.FavoritesStore
 import app.pano.launcher.Screen
 import app.pano.launcher.media.MediaHub
 import app.pano.launcher.navigation.NavHub
@@ -301,6 +304,47 @@ private fun Dashboard(modifier: Modifier) {
     }
 }
 
+private val FavStripHeight = 80.dp
+private val FavStripPadding = 14.dp
+/** Atıf yazısı ve konum düğmesi şeridin üstünde dursun diye bırakılan alt boşluk. */
+private val FavStripClearance = FavStripHeight + FavStripPadding + 10.dp
+
+/** Harita kartının altındaki cam şerit: favori uygulamalar tek satırda, dokununca açılır. */
+@Composable
+private fun FavoritesStrip(c: GlassColors, modifier: Modifier) {
+    val context = LocalContext.current
+    FavoritesStore.load(context)
+    val favorites by FavoritesStore.state
+    val shape = RoundedCornerShape(28.dp)
+
+    Row(
+        modifier.clip(shape).background(c.overMap)
+            .border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), shape)
+            // Şeridin boş yerine dokunmak alttaki haritayı açmasın.
+            .pointerInput(Unit) { detectTapGestures { } }
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        if (favorites.isEmpty()) {
+            Icon(PanoIcons.Star, contentDescription = null, tint = c.tertiary, modifier = Modifier.padding(start = 6.dp).size(20.dp))
+            Text(
+                "Uygulamalar'da bir ikona uzun basarak favori ekle",
+                color = c.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        } else {
+            favorites.forEach { app ->
+                AppIcon(
+                    app.packageName, app.className, 56.dp,
+                    Modifier.clip(RoundedCornerShape(23)).semantics { contentDescription = app.label }
+                        .clickable(role = Role.Button) { Launch.app(context, app.packageName, app.className) },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun MapWidget(modifier: Modifier) {
     val c = glass()
@@ -312,7 +356,7 @@ private fun MapWidget(modifier: Modifier) {
     val shape = RoundedCornerShape(32.dp)
 
     Box(modifier.clip(shape).background(if (c.dark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
-        LiveMap(Modifier.fillMaxSize(), dark = c.dark, showLocation = granted, bottomInset = 0.1f)
+        LiveMap(Modifier.fillMaxSize(), dark = c.dark, showLocation = granted, bottomInset = 0.24f)
         Box(Modifier.fillMaxSize().clickable(role = Role.Button) { Launch.maps(context) })
 
         val nav by NavHub.state.collectAsState()
@@ -333,7 +377,7 @@ private fun MapWidget(modifier: Modifier) {
 
         if (!granted) {
             Row(
-                Modifier.align(Alignment.BottomEnd).padding(16.dp).height(50.dp).clip(RoundedCornerShape(25.dp))
+                Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = FavStripClearance).height(50.dp).clip(RoundedCornerShape(25.dp))
                     .background(c.overMap)
                     .clickable(role = Role.Button) {
                         permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
@@ -346,11 +390,13 @@ private fun MapWidget(modifier: Modifier) {
             }
         }
 
+        FavoritesStrip(c, Modifier.align(Alignment.BottomCenter).padding(FavStripPadding).fillMaxWidth().height(FavStripHeight))
+
         // OpenStreetMap lisansı gereği atıf görünür kalmalı.
         Text(
             "© OpenFreeMap © OpenMapTiles © OpenStreetMap",
             color = c.secondary, fontSize = 10.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = 12.dp)
+            modifier = Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = FavStripClearance)
                 .clip(RoundedCornerShape(6.dp)).background(c.overMap).padding(horizontal = 6.dp, vertical = 2.dp),
         )
 
