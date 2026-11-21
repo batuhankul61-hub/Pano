@@ -31,7 +31,11 @@ data class VehicleFeatures(
             ).associateWith { BydBus.readInt("Setting", it) }
             Log.i(TAG, "ham: $probe")
             return VehicleFeatures(
-                dualZoneClimate = has("SET_CAR_DUAL_TEMP_AREA_AC_DET") ?: true,
+                // Algılama sinyali boş gelirse klima tipine bakılır: Atto 2 AC_TYPE=1 bildiriyor ve
+                // sürücü sıcaklığı değişince yolcu da aynı değere geçiyor (tek bölge).
+                dualZoneClimate = has("SET_CAR_DUAL_TEMP_AREA_AC_DET")
+                    ?: BydBus.readInt("Ac", "AC_TYPE")?.let { it != 1 }
+                    ?: true,
                 seatHeating = (has("SET_HAS_DRIVER_SEAT_HEATING") == true) || (has("SET_HAS_SEAT_HEATING_AND_VENTILATING") == true),
                 electricTailgate = has("SET_CAR_BACK_DOOR_ELECTRIC_MODE_DET"),
                 mirrorFold = has("SET_HAVE_REARVIEW_MIRROR_AUTO_FOLD"),
