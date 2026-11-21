@@ -4,6 +4,25 @@ import android.Manifest
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -41,6 +61,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -137,6 +159,42 @@ private fun Modifier.glass(c: GlassColors, shape: Shape = RoundedCornerShape(32.
         .background(Brush.verticalGradient(listOf(c.sheen, Color.Transparent)))
         .border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), shape)
 
+// ───────────────────────── Animasyon ─────────────────────────
+
+/** Animasyonlar sürüşte dikkat dağıtmasın diye kısa tutulur. */
+private const val MotionMs = 260
+
+/**
+ * Basınca hafifçe küçülen dokunma hissi (iOS / CarPlay gibi). Dokunmayı yalnızca izler, tüketmez;
+ * bu yüzden içindeki herhangi bir tıklanabilir öğeyle (RoundIconButton dahil) birlikte çalışır.
+ * Zincirin başına (boyut ve kırpmadan önce) koy ki bütün karo birlikte küçülsün.
+ */
+private fun Modifier.pressScale(pressed: Float = 0.95f): Modifier = composed {
+    var down by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        if (down) pressed else 1f,
+        spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
+        label = "basma",
+    )
+    this.graphicsLayer { scaleX = scale; scaleY = scale }
+        .pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                down = true
+                waitForUpOrCancellation()
+                down = false
+            }
+        }
+}
+
+/** Ekranların sırası; geçişte yön buna göre seçilir (çubukta aşağıdaki ekran aşağıdan gelir). */
+private fun Screen.order(): Int = when (this) {
+    Screen.Home -> 0
+    Screen.Climate -> 1
+    Screen.Apps -> 2
+    Screen.Settings -> 3
+}
+
 private class Blob(val brush: Brush, val center: Offset, val radius: Float)
 
 private fun blob(color: Color, alpha: Float, center: Offset, radius: Float) =
@@ -186,15 +244,31 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
             Row(Modifier.fillMaxSize().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 Rail(screen, onNavigate, Modifier.width(116.dp).fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        when (screen) {
-                            Screen.Home -> Dashboard(Modifier.fillMaxSize())
-                            Screen.Climate -> ClimateScreen(climate) { onNavigate(Screen.Home) }
-                            Screen.Apps -> AppsScreen { onNavigate(Screen.Home) }
-                            Screen.Settings -> SettingsScreen { onNavigate(Screen.Home) }
+                    // Ekranlar arası kısa fade + hafif dikey kayma.
+                    AnimatedContent(
+                        targetState = screen,
+                        transitionSpec = {
+                            val dir = if (targetState.order() > initialState.order()) 1 else -1
+                            (fadeIn(tween(MotionMs)) + slideInVertically(tween(MotionMs)) { dir * it / 14 })
+                                .togetherWith(fadeOut(tween(MotionMs / 2)) + slideOutVertically(tween(MotionMs)) { -dir * it / 14 })
+                        },
+                        label = "ekran",
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    ) { target ->
+                        Box(Modifier.fillMaxSize()) {
+                            when (target) {
+                                Screen.Home -> Dashboard(Modifier.fillMaxSize())
+                                Screen.Climate -> ClimateScreen(climate) { onNavigate(Screen.Home) }
+                                Screen.Apps -> AppsScreen { onNavigate(Screen.Home) }
+                                Screen.Settings -> SettingsScreen { onNavigate(Screen.Home) }
+                            }
                         }
                     }
-                    if (screen != Screen.Climate) {
+                    AnimatedVisibility(
+                        visible = screen != Screen.Climate,
+                        enter = fadeIn(tween(MotionMs)) + expandVertically(tween(MotionMs)),
+                        exit = fadeOut(tween(MotionMs / 2)) + shrinkVertically(tween(MotionMs)),
+                    ) {
                         ClimateStrip(climate, { onNavigate(Screen.Climate) }, Modifier.fillMaxWidth().height(92.dp))
                     }
                 }
@@ -230,27 +304,53 @@ private fun Rail(current: Screen, onNavigate: (Screen) -> Unit, modifier: Modifi
             )
         }
         Spacer(Modifier.height(18.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            RailApp(PanoIcons.Navigation, "Haritalar", listOf(Color(0xFF5AC8FA), Color(0xFF007AFF)), false) { Launch.maps(context) }
-            RailApp(PanoIcons.Music, "Müzik", listOf(Color(0xFFFF6482), Color(0xFFFF2D55)), false) { Launch.music(context, playing?.packageName) }
-            RailApp(PanoIcons.Phone, "Telefon", listOf(Color(0xFF63E07F), Color(0xFF28C840)), false) { Launch.phone(context) }
-            RailApp(PanoIcons.Fan, "Klima", listOf(Color(0xFFFFB340), Color(0xFFFF8A00)), current == Screen.Climate) { toggle(Screen.Climate) }
-            RailApp(PanoIcons.Apps, "Uygulamalar", listOf(Color(0xFF9A9AA0), Color(0xFF48484A)), current == Screen.Apps) { toggle(Screen.Apps) }
-            RailApp(PanoIcons.Sliders, "Ayarlar", listOf(Color(0xFFAEAEB2), Color(0xFF636366)), current == Screen.Settings) { toggle(Screen.Settings) }
+        // Seçili ekranın arkasındaki cam vurgu tek bir kutu; seçim değişince yeni öğeye kayar.
+        val activeIndex = when (current) {
+            Screen.Climate -> 3
+            Screen.Apps -> 4
+            Screen.Settings -> 5
+            Screen.Home -> -1
+        }
+        var lastIndex by remember { mutableIntStateOf(if (activeIndex >= 0) activeIndex else 3) }
+        if (activeIndex >= 0) lastIndex = activeIndex
+        val highlightY by animateDpAsState(
+            (RailItemSize + RailItemGap) * lastIndex,
+            spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
+            label = "vurgu",
+        )
+        val highlightAlpha by animateFloatAsState(if (activeIndex >= 0) 1f else 0f, tween(MotionMs / 2), label = "vurgu-görünürlük")
+        Box {
+            Box(
+                Modifier.offset(y = highlightY).size(RailItemSize)
+                    .graphicsLayer { alpha = highlightAlpha }
+                    .clip(RoundedCornerShape(26.dp)).background(c.chip),
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(RailItemGap), horizontalAlignment = Alignment.CenterHorizontally) {
+                RailApp(PanoIcons.Navigation, "Haritalar", listOf(Color(0xFF5AC8FA), Color(0xFF007AFF))) { Launch.maps(context) }
+                RailApp(PanoIcons.Music, "Müzik", listOf(Color(0xFFFF6482), Color(0xFFFF2D55))) { Launch.music(context, playing?.packageName) }
+                RailApp(PanoIcons.Phone, "Telefon", listOf(Color(0xFF63E07F), Color(0xFF28C840))) { Launch.phone(context) }
+                RailApp(PanoIcons.Fan, "Klima", listOf(Color(0xFFFFB340), Color(0xFFFF8A00))) { toggle(Screen.Climate) }
+                RailApp(PanoIcons.Apps, "Uygulamalar", listOf(Color(0xFF9A9AA0), Color(0xFF48484A))) { toggle(Screen.Apps) }
+                RailApp(PanoIcons.Sliders, "Ayarlar", listOf(Color(0xFFAEAEB2), Color(0xFF636366))) { toggle(Screen.Settings) }
+            }
         }
         Spacer(Modifier.weight(1f))
         // CarPlay'deki "Dashboard" düğmesi: her zaman ana panoya döner.
         val home = current == Screen.Home
+        val homeBg by animateColorAsState(if (home) c.text else c.chip, tween(MotionMs), label = "pano-zemin")
+        val homeTint by animateColorAsState(
+            if (home) (if (c.dark) Color.Black else Color.White) else c.text, tween(MotionMs), label = "pano-ikon",
+        )
         Box(
-            Modifier.size(68.dp).clip(CircleShape)
-                .background(if (home) c.text else c.chip)
+            Modifier.pressScale().size(68.dp).clip(CircleShape)
+                .background(homeBg)
                 .clickable(role = Role.Button) { onNavigate(Screen.Home) }
                 .semantics { contentDescription = "Ana pano" },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 PanoIcons.Dashboard, contentDescription = null,
-                tint = if (home) (if (c.dark) Color.Black else Color.White) else c.text, modifier = Modifier.size(28.dp),
+                tint = homeTint, modifier = Modifier.size(28.dp),
             )
         }
     }
@@ -265,14 +365,15 @@ private fun SignalBars(c: GlassColors) {
     }
 }
 
-/** CarPlay uygulama ikonu: renk geçişli yumuşak kare. Etkin olanın arkasında cam bir vurgu var. */
+private val RailItemSize = 88.dp
+private val RailItemGap = 4.dp
+
+/** CarPlay uygulama ikonu: renk geçişli yumuşak kare. Etkin olanın vurgusunu Rail çizer (kayan kutu). */
 @Composable
-private fun RailApp(icon: ImageVector, label: String, tint: List<Color>, active: Boolean, onClick: () -> Unit) {
-    val c = glass()
+private fun RailApp(icon: ImageVector, label: String, tint: List<Color>, onClick: () -> Unit) {
     val tile = RoundedCornerShape(18.dp)
     Box(
-        Modifier.size(88.dp).clip(RoundedCornerShape(26.dp))
-            .background(if (active) c.chip else Color.Transparent)
+        Modifier.pressScale().size(RailItemSize).clip(RoundedCornerShape(26.dp))
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
@@ -337,7 +438,7 @@ private fun FavoritesStrip(c: GlassColors, modifier: Modifier) {
             favorites.forEach { app ->
                 AppIcon(
                     app.packageName, app.className, 56.dp,
-                    Modifier.clip(RoundedCornerShape(23)).semantics { contentDescription = app.label }
+                    Modifier.pressScale().clip(RoundedCornerShape(23)).semantics { contentDescription = app.label }
                         .clickable(role = Role.Button) { Launch.app(context, app.packageName, app.className) },
                 )
             }
@@ -365,7 +466,7 @@ private fun MapWidget(modifier: Modifier) {
             // Navigasyon uygulaması rota veriyorsa: CarPlay'deki yeşil manevra kartı.
             ManeuverCard(step, Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth()) { Launch.maps(context) }
         } else Row(
-            Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth().height(60.dp)
+            Modifier.align(Alignment.TopStart).padding(16.dp).pressScale(0.97f).fillMaxWidth().height(60.dp)
                 .clip(RoundedCornerShape(30.dp)).background(c.overMap)
                 .clickable(role = Role.Button) { Launch.maps(context) }
                 .padding(horizontal = 20.dp),
@@ -409,7 +510,7 @@ private fun MapWidget(modifier: Modifier) {
 private fun ManeuverCard(step: NavInstruction, modifier: Modifier, onClick: () -> Unit) {
     val shape = RoundedCornerShape(26.dp)
     Column(
-        modifier.shadow(16.dp, shape).clip(shape)
+        modifier.pressScale(0.97f).shadow(16.dp, shape).clip(shape)
             .background(Brush.verticalGradient(listOf(Color(0xFF2DBE60), Color(0xFF1E9E4C))))
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 16.dp),
@@ -497,7 +598,7 @@ private fun GlassAction(icon: ImageVector, label: String, onClick: () -> Unit) {
     val c = glass()
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(66.dp).clip(CircleShape).background(c.chip)
+            Modifier.pressScale().size(66.dp).clip(CircleShape).background(c.chip)
                 .border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), CircleShape)
                 .clickable(role = Role.Button, onClick = onClick)
                 .semantics { contentDescription = label },
@@ -593,7 +694,7 @@ private fun NowPlayingWidget(modifier: Modifier) {
     Column(modifier.glass(c).padding(24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(96.dp).shadow(12.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp))
+                Modifier.pressScale().size(96.dp).shadow(12.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp))
                     .background(Brush.linearGradient(listOf(Color(0xFFFF6482), Color(0xFFBF5AF2))))
                     .clickable(role = Role.Button) { Launch.music(context, p?.packageName) },
                 contentAlignment = Alignment.Center,
@@ -701,7 +802,7 @@ private fun ClimateStrip(climate: ClimateState, onOpen: () -> Unit, modifier: Mo
                 )
                 RoundIconButton(PanoIcons.Plus, "Fanı artır", { climate.setFanLevel(climate.fan + 1) }, Color.Transparent, c.text, size = 58.dp, iconSize = 20.dp)
             }
-            RoundIconButton(PanoIcons.ChevronUp, "Klima ayrıntıları", onOpen, c.chip, c.text, size = 58.dp, iconSize = 22.dp)
+            Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronUp, "Klima ayrıntıları", onOpen, c.chip, c.text, size = 58.dp, iconSize = 22.dp) }
         }
         TempControl(climate.passenger, climate.isOff, "Yolcu", { climate.changePassenger(-0.5f) }, { climate.changePassenger(0.5f) })
     }
@@ -711,13 +812,13 @@ private fun ClimateStrip(climate: ClimateState, onOpen: () -> Unit, modifier: Mo
 private fun TempControl(value: Float, off: Boolean, who: String, onDown: () -> Unit, onUp: () -> Unit) {
     val c = glass()
     Row(verticalAlignment = Alignment.CenterVertically) {
-        RoundIconButton(PanoIcons.ChevronLeft, "$who sıcaklığını düşür", onDown, c.chip, c.text, size = 56.dp, iconSize = 22.dp)
+        Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronLeft, "$who sıcaklığını düşür", onDown, c.chip, c.text, size = 56.dp, iconSize = 22.dp) }
         Text(
             if (off) "—" else shortTemp(value),
             color = c.text, fontSize = 34.sp, fontWeight = FontWeight.Normal, letterSpacing = (-1).sp,
             textAlign = TextAlign.Center, modifier = Modifier.width(100.dp),
         )
-        RoundIconButton(PanoIcons.ChevronRight, "$who sıcaklığını artır", onUp, c.chip, c.text, size = 56.dp, iconSize = 22.dp)
+        Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronRight, "$who sıcaklığını artır", onUp, c.chip, c.text, size = 56.dp, iconSize = 22.dp) }
     }
 }
 
@@ -725,7 +826,7 @@ private fun TempControl(value: Float, off: Boolean, who: String, onDown: () -> U
 private fun GlassPill(text: String, on: Boolean, onClick: () -> Unit) {
     val c = glass()
     Box(
-        Modifier.height(58.dp).clip(RoundedCornerShape(29.dp))
+        Modifier.pressScale().height(58.dp).clip(RoundedCornerShape(29.dp))
             .background(if (on) linkColor() else c.chip)
             .clickable(role = Role.Switch, onClick = onClick)
             .padding(horizontal = 26.dp),
