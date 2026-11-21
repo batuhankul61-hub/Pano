@@ -60,6 +60,11 @@ import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
 import app.pano.launcher.Screen
 import app.pano.launcher.media.MediaHub
+import app.pano.launcher.navigation.NavHub
+import app.pano.launcher.navigation.NavInstruction
+import app.pano.launcher.weather.Weather
+import app.pano.launcher.weather.WeatherHub
+import app.pano.launcher.weather.WeatherIcon
 import app.pano.launcher.ui.theme.Accent
 import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.ui.theme.linkColor
@@ -298,8 +303,12 @@ private fun MapWidget(modifier: Modifier) {
         LiveMap(Modifier.fillMaxSize(), dark = c.dark, showLocation = granted, bottomInset = 0.1f)
         Box(Modifier.fillMaxSize().clickable(role = Role.Button) { Launch.maps(context) })
 
-        // CarPlay Haritalar'daki arama kutusu
-        Row(
+        val nav by NavHub.state.collectAsState()
+        val step = nav
+        if (step != null) {
+            // Navigasyon uygulaması rota veriyorsa: CarPlay'deki yeşil manevra kartı.
+            ManeuverCard(step, Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth()) { Launch.maps(context) }
+        } else Row(
             Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth().height(60.dp)
                 .clip(RoundedCornerShape(30.dp)).background(c.overMap)
                 .clickable(role = Role.Button) { Launch.maps(context) }
@@ -335,6 +344,41 @@ private fun MapWidget(modifier: Modifier) {
 
         // Cam çerçeve: haritayı diğer panellerle aynı ışıklı kenarla sarar.
         Box(Modifier.matchParentSize().border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), shape))
+    }
+}
+
+@Composable
+private fun ManeuverCard(step: NavInstruction, modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(26.dp)
+    Column(
+        modifier.shadow(16.dp, shape).clip(shape)
+            .background(Brush.verticalGradient(listOf(Color(0xFF2DBE60), Color(0xFF1E9E4C))))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val icon = step.icon
+            if (icon != null) {
+                Image(icon.asImageBitmap(), contentDescription = null, modifier = Modifier.size(52.dp))
+            } else {
+                Icon(PanoIcons.Navigation, contentDescription = null, tint = Color.White, modifier = Modifier.size(44.dp))
+            }
+            Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                if (step.distance != null) {
+                    Text(step.distance, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp, lineHeight = 32.sp)
+                }
+                Text(
+                    step.street ?: step.maneuver, color = Color.White.copy(alpha = 0.92f),
+                    fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (step.eta != null) {
+            Text(
+                step.eta, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp),
+            )
+        }
     }
 }
 
@@ -407,12 +451,63 @@ private fun GlassAction(icon: ImageVector, label: String, onClick: () -> Unit) {
     }
 }
 
-/** iOS takvim widget'ı havasında: kırmızı gün adı, büyük gün numarası, sağda saat. */
+private fun weatherIcon(w: Weather): ImageVector = when (w.icon) {
+    WeatherIcon.Clear -> if (w.isDay) PanoIcons.Sun else PanoIcons.Moon
+    WeatherIcon.Cloudy -> PanoIcons.Cloud
+    WeatherIcon.Rain -> PanoIcons.Rain
+    WeatherIcon.Snow -> PanoIcons.Snow
+    WeatherIcon.Fog -> PanoIcons.Fog
+    WeatherIcon.Storm -> PanoIcons.Storm
+}
+
+private fun weatherTint(w: Weather): Color = when (w.icon) {
+    WeatherIcon.Clear -> if (w.isDay) Color(0xFFFFCC00) else Color(0xFFBFC8FF)
+    WeatherIcon.Rain, WeatherIcon.Storm -> Color(0xFF64B5FF)
+    WeatherIcon.Snow -> Color(0xFFE3F2FF)
+    else -> Color(0xFFB8C2D0)
+}
+
+private fun deg(v: Double): String = "${Math.round(v)}°"
+
+/**
+ * iOS takvim + hava durumu widget'ı: solda kırmızı gün adı ve büyük gün numarası,
+ * sağda anlık sıcaklık, açıklama ve günün en yüksek / en düşük değeri.
+ * Hava durumu henüz gelmediyse sağda saat gösterilir.
+ */
 @Composable
 private fun ClockWidget(modifier: Modifier) {
     val c = glass()
     val now by rememberClock()
+    val weather by WeatherHub.state.collectAsState()
     val date = Date(now)
+    val w = weather
+    if (w != null) {
+        Row(modifier.glass(c).padding(horizontal = 26.dp, vertical = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    SimpleDateFormat("EEEE", tr).format(date).uppercase(tr),
+                    color = Accent.Red, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+                )
+                Text(SimpleDateFormat("d", tr).format(date), color = c.text, fontSize = 60.sp, fontWeight = FontWeight.Light, lineHeight = 62.sp)
+                Text(SimpleDateFormat("MMMM", tr).format(date), color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(weatherIcon(w), contentDescription = null, tint = weatherTint(w), modifier = Modifier.size(38.dp))
+                    Text(
+                        deg(w.temperatureC), color = c.text, fontSize = 52.sp, fontWeight = FontWeight.Light,
+                        letterSpacing = (-1.5).sp, modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                Text(w.description, color = c.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "Y:${deg(w.highC)}  D:${deg(w.lowC)}",
+                    color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+        return
+    }
     Row(modifier.glass(c).padding(horizontal = 26.dp, vertical = 22.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(
