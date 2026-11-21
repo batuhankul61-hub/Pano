@@ -5,12 +5,31 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import java.text.Normalizer
+import java.util.Locale
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -55,6 +74,44 @@ private fun loadApps(context: Context): List<AppEntry> {
         .sortedBy { it.label.lowercase() }
 }
 
+/** Aramada büyük/küçük harf ve Türkçe karakter farkını yok sayar (ı/i, ş/s, ğ/g, ü/u, ö/o, ç/c). */
+private fun normalizeForSearch(s: String): String =
+    Normalizer.normalize(s.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "")
+        .replace('ı', 'i')
+
+/** Büyük arama alanı (64 dp). Renkler tema metninden türetilir; hem düz hem cam zeminde okunur. */
+@Composable
+private fun SearchField(query: String, onChange: (String) -> Unit) {
+    val colors = LocalPano.current
+    Row(
+        Modifier.fillMaxWidth().height(64.dp)
+            .clip(RoundedCornerShape(32.dp))
+            .background(colors.text.copy(alpha = if (colors.isDark) 0.12f else 0.08f))
+            .padding(start = 22.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(PanoIcons.Search, null, tint = colors.secondary, modifier = Modifier.size(28.dp))
+        Box(Modifier.weight(1f).padding(horizontal = 14.dp), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) Text("Uygulama ara", color = colors.secondary, fontSize = 22.sp)
+            BasicTextField(
+                value = query, onValueChange = onChange, singleLine = true,
+                textStyle = TextStyle(color = colors.text, fontSize = 22.sp),
+                cursorBrush = SolidColor(colors.text),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (query.isNotEmpty()) {
+            Box(
+                Modifier.size(56.dp).clip(CircleShape)
+                    .clickable(role = Role.Button, onClickLabel = "Aramayı temizle") { onChange("") },
+                contentAlignment = Alignment.Center,
+            ) { Icon(PanoIcons.Close, "Temizle", tint = colors.secondary, modifier = Modifier.size(26.dp)) }
+        }
+    }
+}
+
 /** Yüklü tüm uygulamalar. Dokununca açılır, uzun basınca favorilere eklenir ya da çıkarılır. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -68,15 +125,34 @@ fun AppsScreen(onBack: () -> Unit) {
         value = withContext(Dispatchers.IO) { loadApps(context) }
     }
 
+    var query by rememberSaveable { mutableStateOf("") }
+    val indexed = remember(apps) { apps.map { it to normalizeForSearch(it.label) } }
+    val shown = remember(indexed, query) {
+        val q = normalizeForSearch(query.trim())
+        if (q.isEmpty()) apps else indexed.filter { q in it.second }.map { it.first }
+    }
+
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-        ScreenHeader("Uygulamalar", onBack, subtitle = if (apps.isEmpty()) null else "${apps.size} uygulama · favori için uzun bas")
+        ScreenHeader(
+            "Uygulamalar", onBack,
+            subtitle = if (apps.isEmpty()) null
+            else if (query.isBlank()) "${apps.size} uygulama · favori için uzun bas"
+            else "${shown.size} / ${apps.size} uygulama",
+        )
+        SearchField(query, { query = it })
+        if (apps.isNotEmpty() && shown.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("“${query.trim()}” için uygulama bulunamadı", color = colors.secondary, fontSize = 20.sp, textAlign = TextAlign.Center)
+            }
+            return@Column
+        }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
             modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(32.dp)),
             contentPadding = PaddingValues(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            items(apps, key = { it.packageName + "/" + it.className }) { app ->
+            items(shown, key = { it.packageName + "/" + it.className }) { app ->
                 val favorite = favorites.any { it.packageName == app.packageName && it.className == app.className }
                 Column(
                     Modifier.clip(RoundedCornerShape(20.dp))

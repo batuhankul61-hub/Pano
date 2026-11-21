@@ -63,6 +63,7 @@ object PanoIcons {
     val ChevronDown = line("chevron.down", "M5 9l7 7 7-7", 2f)
     val Minus = line("minus", "M5 12h14", 2f)
     val Plus = line("plus", "M5 12h14M12 5v14", 2f)
+    val Close = line("xmark", "M6 6l12 12M18 6L6 18", 2f)
     val Power = line("power", "M12 3.5v7.5M7.2 6.6a7 7 0 1 0 9.6 0", 2f)
     val AirFace = line("air.face", circle(17f, 5.5f, 2f) + "M17 9v5.5l2 6M3 8.5h8.5M8.5 5.5l3 3-3 3")
     val AirFeet = line("air.feet", circle(17f, 4.5f, 2f) + "M17 8v6l-2.5 6M3 17.5h8.5M8.5 14.5l3 3-3 3")
