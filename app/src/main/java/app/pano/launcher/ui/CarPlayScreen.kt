@@ -16,6 +16,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -59,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.composed
@@ -93,7 +96,9 @@ import app.pano.launcher.ui.theme.Accent
 import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.ui.theme.linkColor
 import app.pano.launcher.vehicle.ClimateState
-import app.pano.launcher.vehicle.VehicleSource
+import app.pano.launcher.vehicle.Gear
+import app.pano.launcher.vehicle.SpeedSource
+import app.pano.launcher.vehicle.VehicleHub
 import app.pano.launcher.vehicle.decimal
 import app.pano.launcher.vehicle.shortTemp
 import kotlinx.coroutines.delay
@@ -259,8 +264,8 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                             when (target) {
                                 Screen.Home -> Dashboard(Modifier.fillMaxSize())
                                 Screen.Climate -> ClimateScreen(climate) { onNavigate(Screen.Home) }
-                                Screen.Apps -> AppsScreen { onNavigate(Screen.Home) }
-                                Screen.Settings -> SettingsScreen { onNavigate(Screen.Home) }
+                                Screen.Apps -> DrivingGate("Uygulamalar", { onNavigate(Screen.Home) }) { AppsScreen { onNavigate(Screen.Home) } }
+                                Screen.Settings -> DrivingGate("Ayarlar", { onNavigate(Screen.Home) }) { SettingsScreen { onNavigate(Screen.Home) } }
                             }
                         }
                     }
@@ -285,7 +290,8 @@ private fun Rail(current: Screen, onNavigate: (Screen) -> Unit, modifier: Modifi
     val context = LocalContext.current
     val now by rememberClock()
     val playing by MediaHub.state.collectAsState()
-    val vehicle = VehicleSource.current()
+    val vehicle by VehicleHub.state.collectAsState()
+    val driving by VehicleHub.isDriving.collectAsState()
     fun toggle(target: Screen) = onNavigate(if (current == target) Screen.Home else target)
 
     Column(
@@ -299,7 +305,7 @@ private fun Rail(current: Screen, onNavigate: (Screen) -> Unit, modifier: Modifi
         Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             SignalBars(c)
             Text(
-                "%${vehicle.batteryPercent}", color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                "%${vehicle.batteryPercent ?: "—"}", color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(start = 6.dp),
             )
         }
@@ -330,8 +336,9 @@ private fun Rail(current: Screen, onNavigate: (Screen) -> Unit, modifier: Modifi
                 RailApp(PanoIcons.Music, "Müzik", listOf(Color(0xFFFF6482), Color(0xFFFF2D55))) { Launch.music(context, playing?.packageName) }
                 RailApp(PanoIcons.Phone, "Telefon", listOf(Color(0xFF63E07F), Color(0xFF28C840))) { Launch.phone(context) }
                 RailApp(PanoIcons.Fan, "Klima", listOf(Color(0xFFFFB340), Color(0xFFFF8A00))) { toggle(Screen.Climate) }
-                RailApp(PanoIcons.Apps, "Uygulamalar", listOf(Color(0xFF9A9AA0), Color(0xFF48484A))) { toggle(Screen.Apps) }
-                RailApp(PanoIcons.Sliders, "Ayarlar", listOf(Color(0xFFAEAEB2), Color(0xFF636366))) { toggle(Screen.Settings) }
+                // Sürüşte soluklaşır; dokununca sürüş uyarısı açılır.
+                RailApp(PanoIcons.Apps, "Uygulamalar", listOf(Color(0xFF9A9AA0), Color(0xFF48484A)), dimmed = driving) { toggle(Screen.Apps) }
+                RailApp(PanoIcons.Sliders, "Ayarlar", listOf(Color(0xFFAEAEB2), Color(0xFF636366)), dimmed = driving) { toggle(Screen.Settings) }
             }
         }
         Spacer(Modifier.weight(1f))
@@ -370,10 +377,11 @@ private val RailItemGap = 4.dp
 
 /** CarPlay uygulama ikonu: renk geçişli yumuşak kare. Etkin olanın vurgusunu Rail çizer (kayan kutu). */
 @Composable
-private fun RailApp(icon: ImageVector, label: String, tint: List<Color>, onClick: () -> Unit) {
+private fun RailApp(icon: ImageVector, label: String, tint: List<Color>, dimmed: Boolean = false, onClick: () -> Unit) {
     val tile = RoundedCornerShape(18.dp)
+    val fade by animateFloatAsState(if (dimmed) 0.35f else 1f, tween(MotionMs), label = "soluk")
     Box(
-        Modifier.pressScale().size(RailItemSize).clip(RoundedCornerShape(26.dp))
+        Modifier.pressScale().size(RailItemSize).graphicsLayer { alpha = fade }.clip(RoundedCornerShape(26.dp))
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
@@ -394,13 +402,70 @@ private fun RailApp(icon: ImageVector, label: String, tint: List<Color>, onClick
 
 @Composable
 private fun Dashboard(modifier: Modifier) {
+    val driving by VehicleHub.isDriving.collectAsState()
+    // 1 = park düzeni, 0 = sürüş düzeni. Ağırlık ve boşluklar birlikte küçülür; sıçrama olmaz.
+    val parked by animateFloatAsState(if (driving) 0f else 1f, tween(MotionMs * 2), label = "sürüş-düzeni")
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
         MapWidget(Modifier.weight(1.25f).fillMaxHeight())
         VehicleWidget(Modifier.weight(1f).fillMaxHeight())
-        Column(Modifier.weight(0.9f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            ClockWidget(Modifier.weight(0.82f).fillMaxWidth())
+        Column(Modifier.weight(0.9f).fillMaxHeight()) {
+            if (parked > 0.001f) {
+                ClockWidget(Modifier.weight(0.82f * parked).fillMaxWidth().graphicsLayer { alpha = parked }.clipToBounds())
+                Spacer(Modifier.height(18.dp * parked))
+            }
             NowPlayingWidget(Modifier.weight(1.3f).fillMaxWidth())
-            ConsumptionWidget(Modifier.weight(0.5f).fillMaxWidth())
+            if (parked > 0.001f) {
+                Spacer(Modifier.height(18.dp * parked))
+                ConsumptionWidget(Modifier.weight(0.5f * parked).fillMaxWidth().graphicsLayer { alpha = parked }.clipToBounds())
+            }
+        }
+    }
+}
+
+/**
+ * Sürüş sırasında dikkat dağıtan ekranların (uygulama ızgarası, uzun ayar listeleri) yerine
+ * büyük bir uyarı ve ana panoya dönüş düğmesi gösterir. Araç durunca içerik geri gelir.
+ */
+@Composable
+private fun DrivingGate(title: String, onHome: () -> Unit, content: @Composable () -> Unit) {
+    val driving by VehicleHub.isDriving.collectAsState()
+    AnimatedContent(
+        targetState = driving,
+        transitionSpec = {
+            (fadeIn(tween(MotionMs)) + scaleIn(tween(MotionMs), initialScale = 0.96f))
+                .togetherWith(fadeOut(tween(MotionMs / 2)) + scaleOut(tween(MotionMs), targetScale = 0.96f))
+        },
+        label = "sürüş-kilidi",
+        modifier = Modifier.fillMaxSize(),
+    ) { locked ->
+        if (!locked) {
+            Box(Modifier.fillMaxSize()) { content() }
+        } else {
+            val c = glass()
+            Column(
+                Modifier.fillMaxSize().glass(c).padding(48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(PanoIcons.Navigation, contentDescription = null, tint = c.secondary, modifier = Modifier.size(64.dp))
+                Text(
+                    "$title sürüş sırasında kapalı", color = c.text, fontSize = 36.sp, fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center, modifier = Modifier.padding(top = 24.dp),
+                )
+                Text(
+                    "Araç durunca kendiliğinden açılır.", color = c.secondary, fontSize = 20.sp, fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center, modifier = Modifier.padding(top = 10.dp),
+                )
+                Box(
+                    Modifier.padding(top = 36.dp).pressScale().height(72.dp).clip(RoundedCornerShape(36.dp))
+                        .background(c.chip)
+                        .clickable(role = Role.Button, onClick = onHome)
+                        .padding(horizontal = 40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("Ana panoya dön", color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }
@@ -455,6 +520,9 @@ private fun MapWidget(modifier: Modifier) {
         granted = hasLocationPermission(context)
     }
     val shape = RoundedCornerShape(32.dp)
+    val driving by VehicleHub.isDriving.collectAsState()
+    // Favori şeridi sürüşte gizlenince atıf ve konum düğmesi aşağı kayar.
+    val clearance by animateDpAsState(if (driving) 14.dp else FavStripClearance, tween(MotionMs * 2), label = "şerit-boşluğu")
 
     Box(modifier.clip(shape).background(if (c.dark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
         LiveMap(Modifier.fillMaxSize(), dark = c.dark, showLocation = granted, bottomInset = 0.24f)
@@ -478,7 +546,7 @@ private fun MapWidget(modifier: Modifier) {
 
         if (!granted) {
             Row(
-                Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = FavStripClearance).height(50.dp).clip(RoundedCornerShape(25.dp))
+                Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = clearance).height(50.dp).clip(RoundedCornerShape(25.dp))
                     .background(c.overMap)
                     .clickable(role = Role.Button) {
                         permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
@@ -491,13 +559,20 @@ private fun MapWidget(modifier: Modifier) {
             }
         }
 
-        FavoritesStrip(c, Modifier.align(Alignment.BottomCenter).padding(FavStripPadding).fillMaxWidth().height(FavStripHeight))
+        AnimatedVisibility(
+            visible = !driving,
+            enter = fadeIn(tween(MotionMs)) + slideInVertically(tween(MotionMs * 2)) { it / 2 },
+            exit = fadeOut(tween(MotionMs)) + slideOutVertically(tween(MotionMs * 2)) { it / 2 },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            FavoritesStrip(c, Modifier.padding(FavStripPadding).fillMaxWidth().height(FavStripHeight))
+        }
 
         // OpenStreetMap lisansı gereği atıf görünür kalmalı.
         Text(
             "© OpenFreeMap © OpenMapTiles © OpenStreetMap",
             color = c.secondary, fontSize = 10.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = FavStripClearance)
+            modifier = Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = clearance)
                 .clip(RoundedCornerShape(6.dp)).background(c.overMap).padding(horizontal = 6.dp, vertical = 2.dp),
         )
 
@@ -545,17 +620,42 @@ private fun ManeuverCard(step: NavInstruction, modifier: Modifier, onClick: () -
 private fun VehicleWidget(modifier: Modifier) {
     val c = glass()
     val context = LocalContext.current
-    val v = VehicleSource.current()
+    val v by VehicleHub.state.collectAsState()
+    val driving by VehicleHub.isDriving.collectAsState()
 
     Column(modifier.glass(c).padding(28.dp)) {
         Row(Modifier.fillMaxWidth()) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text("0", color = c.text, fontSize = 80.sp, fontWeight = FontWeight.Light, letterSpacing = (-3).sp, lineHeight = 80.sp)
+                    // Hız yoksa (BYD veri yolu da GPS de yok) "—": uydurma 0 gösterilmez.
+                    Text(v.speedKmh?.toString() ?: "—", color = c.text, fontSize = 80.sp, fontWeight = FontWeight.Light, letterSpacing = (-3).sp, lineHeight = 80.sp)
                     Text("km/s", color = c.secondary, fontSize = 20.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp, bottom = 12.dp))
                 }
                 Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("PARK", color = Accent.Green, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                    val status = when {
+                        v.gear == Gear.R -> "GERİ"
+                        driving -> "SÜRÜŞ"
+                        v.gear == Gear.N -> "BOŞ"
+                        else -> "PARK"
+                    }
+                    val statusColor by animateColorAsState(if (driving) linkColor() else Accent.Green, tween(MotionMs), label = "durum-rengi")
+                    AnimatedContent(
+                        targetState = status,
+                        transitionSpec = {
+                            (fadeIn(tween(MotionMs)) + slideInVertically(tween(MotionMs)) { it / 2 })
+                                .togetherWith(fadeOut(tween(MotionMs / 2)) + slideOutVertically(tween(MotionMs)) { -it / 2 })
+                        },
+                        label = "durum",
+                    ) { label ->
+                        Text(label, color = statusColor, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                    }
+                    if (v.speedSource == SpeedSource.Gps) {
+                        Text(
+                            "GPS", color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 10.dp).clip(RoundedCornerShape(8.dp)).background(c.chip)
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
                     if (v.isPreview) {
                         Text(
                             "Önizleme", color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
@@ -568,27 +668,39 @@ private fun VehicleWidget(modifier: Modifier) {
             Column(horizontalAlignment = Alignment.End) {
                 Text("MENZİL", color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp)
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text("${v.rangeKm}", color = c.text, fontSize = 44.sp, fontWeight = FontWeight.Medium, letterSpacing = (-1.2).sp, lineHeight = 44.sp)
+                    Text(v.rangeKm?.toString() ?: "—", color = c.text, fontSize = 44.sp, fontWeight = FontWeight.Medium, letterSpacing = (-1.2).sp, lineHeight = 44.sp)
                     Text("km", color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
                 }
                 Box(Modifier.padding(top = 10.dp).width(150.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.chip)) {
                     Box(
-                        Modifier.fillMaxHeight().fillMaxWidth(v.batteryPercent / 100f).clip(RoundedCornerShape(3.dp))
+                        Modifier.fillMaxHeight().fillMaxWidth((v.batteryPercent ?: 0) / 100f).clip(RoundedCornerShape(3.dp))
                             .background(Brush.horizontalGradient(listOf(Color(0xFF30D158), Color(0xFF63E6A0)))),
                     )
                 }
-                Text("%${v.batteryPercent}", color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
+                Text("%${v.batteryPercent ?: "—"}", color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
             }
         }
 
         CarIllustration(Modifier.weight(1f).fillMaxWidth().padding(vertical = 10.dp), dark = c.dark, background = Color.Transparent)
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            val notYet = { Launch.notConnectedYet(context) }
-            GlassAction(if (v.locked) PanoIcons.Lock else PanoIcons.Unlock, if (v.locked) "Kilitli" else "Açık", notYet)
-            GlassAction(PanoIcons.Trunk, "Bagaj", notYet)
-            GlassAction(PanoIcons.Bolt, "Şarj", notYet)
-            GlassAction(PanoIcons.Mirror, "Aynalar", notYet)
+        // Araç düğmeleri sürüşte gerekmez; kapanınca araç çizimi büyür.
+        AnimatedVisibility(
+            visible = !driving,
+            enter = fadeIn(tween(MotionMs)) + expandVertically(tween(MotionMs * 2)),
+            exit = fadeOut(tween(MotionMs / 2)) + shrinkVertically(tween(MotionMs * 2)),
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                val notYet = { Launch.notConnectedYet(context) }
+                val locked = v.locked
+                GlassAction(
+                    if (locked == false) PanoIcons.Unlock else PanoIcons.Lock,
+                    when (locked) { true -> "Kilitli"; false -> "Açık"; null -> "Kilit" },
+                    notYet,
+                )
+                GlassAction(PanoIcons.Trunk, "Bagaj", notYet)
+                GlassAction(PanoIcons.Bolt, "Şarj", notYet)
+                GlassAction(PanoIcons.Mirror, "Aynalar", notYet)
+            }
         }
     }
 }
@@ -689,6 +801,7 @@ private fun NowPlayingWidget(modifier: Modifier) {
     val context = LocalContext.current
     val playing by MediaHub.state.collectAsState()
     val now by rememberClock()
+    val driving by VehicleHub.isDriving.collectAsState()
     val p = playing
 
     Column(modifier.glass(c).padding(24.dp)) {
@@ -717,7 +830,7 @@ private fun NowPlayingWidget(modifier: Modifier) {
                 )
                 if (p != null) {
                     Text(p.artist, color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                } else if (!MediaHub.hasAccess(context)) {
+                } else if (!driving && !MediaHub.hasAccess(context)) {
                     Text(
                         "Bildirim erişimi ver", color = linkColor(), fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.clickable { Launch.notificationAccess(context) },
@@ -760,7 +873,7 @@ private fun NowPlayingWidget(modifier: Modifier) {
 @Composable
 private fun ConsumptionWidget(modifier: Modifier) {
     val c = glass()
-    val v = VehicleSource.current()
+    val v by VehicleHub.state.collectAsState()
     Row(modifier.glass(c).padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
@@ -770,7 +883,7 @@ private fun ConsumptionWidget(modifier: Modifier) {
             Icon(PanoIcons.Bolt, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
         }
         Text("Tüketim", color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 14.dp).weight(1f))
-        Text(decimal(v.consumptionKwh100), color = c.text, fontSize = 28.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.6).sp)
+        Text(v.consumptionKwh100?.let(::decimal) ?: "—", color = c.text, fontSize = 28.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.6).sp)
         Text("kWh/100", color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp))
     }
 }
