@@ -57,6 +57,7 @@ internal object BydBus {
     private var getInt: Method? = null
     private var getDouble: Method? = null
     private var setIntArray: Method? = null
+    private var setInt: Method? = null
     private val ids = HashMap<String, Int?>()
     private var tried = false
 
@@ -79,6 +80,7 @@ internal object BydBus {
             setIntArray = runCatching {
                 clazz.getMethod("setIntArray", int, IntArray::class.java, IntArray::class.java)
             }.getOrNull()
+            setInt = runCatching { clazz.getMethod("setInt", int, int, int) }.getOrNull()
             manager = instance
             instance != null
         }.onFailure {
@@ -105,6 +107,25 @@ internal object BydBus {
     }.getOrNull()
         // DiLink 3.0'da yazma kimlikleri (…_SET) üst sınıfta da duruyor.
         ?: runCatching { Class.forName("android.hardware.bydauto.BYDAutoFeatureIds").getField(field).getInt(null) }.getOrNull()
+
+    /** Özellik kimliği adı. */
+    fun idOf(group: String, field: String): Int? = featureId(group, field)
+
+    /** Tek sinyal yazar (BYD cihaz sınıflarındaki `set(tür, kimlik, değer)` ile aynı). */
+    fun writeOne(deviceType: Int, featureId: Int, value: Int): Int? {
+        val target = manager ?: return null
+        val method = setInt ?: return null
+        return runCatching { method.invoke(target, deviceType, featureId, value) as? Int }
+            .onFailure { Log.w(TAG, "yazma 0x${Integer.toHexString(featureId)}: ${it.cause ?: it}") }
+            .getOrNull()
+            .also { Log.i(TAG, "yazma tür=$deviceType kimlik=0x${Integer.toHexString(featureId)} değer=$value → $it") }
+    }
+
+    /** Ham kimlikle okuma (adı bilinmeyen sinyaller için). */
+    fun readRaw(featureId: Int): Int? {
+        val target = manager ?: return null
+        return runCatching { getInt?.invoke(target, DEVICE_ANY, featureId) as? Int }.getOrNull()
+    }
 
     /**
      * Birden çok sinyali tek komutla yazar (BYD'nin kendi cihaz sınıfları da böyle gönderir).
