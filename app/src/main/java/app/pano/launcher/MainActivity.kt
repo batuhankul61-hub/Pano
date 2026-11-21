@@ -26,6 +26,7 @@ import app.pano.launcher.ui.ClimateScreen
 import app.pano.launcher.ui.DesignCanvas
 import app.pano.launcher.ui.Dock
 import app.pano.launcher.ui.HomeScreen
+import app.pano.launcher.ui.returnZoom
 import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.settings.LayoutStyle
 import app.pano.launcher.settings.LocalStyle
@@ -55,6 +56,17 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.hasCategory(Intent.CATEGORY_HOME)) screen.value = Screen.Home
+    }
+
+    private var lastReturnFor = 0L
+
+    /** Bizim açtığımız bir uygulamadan dönülüyorsa içerik kısa bir yakınlaşmayla gelir. */
+    override fun onRestart() {
+        super.onRestart()
+        if (Launch.lastLaunchAt != 0L && Launch.lastLaunchAt != lastReturnFor) {
+            lastReturnFor = Launch.lastLaunchAt
+            app.pano.launcher.ui.ReturnMotion.onReturn()
+        }
     }
 
     override fun onResume() {
@@ -98,7 +110,7 @@ private fun ClassicApp(screen: Screen, climate: ClimateState, onNavigate: (Scree
     Box(Modifier.fillMaxSize().background(colors.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
         DesignCanvas {
             Column(
-                Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 26.dp, bottom = 24.dp),
+                Modifier.fillMaxSize().returnZoom().padding(start = 32.dp, end = 32.dp, top = 26.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {

@@ -49,6 +49,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
@@ -84,6 +85,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
+import app.pano.launcher.LaunchAnchor
 import app.pano.launcher.settings.FavoritesStore
 import app.pano.launcher.Screen
 import app.pano.launcher.media.MediaHub
@@ -246,7 +248,8 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
         DesignCanvas {
-            Row(Modifier.fillMaxSize().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            // Duvar kağıdı sabit kalır; başka uygulamadan dönünce yalnızca içerik yakınlaşarak gelir.
+            Row(Modifier.fillMaxSize().returnZoom().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 Rail(screen, onNavigate, Modifier.width(116.dp).fillMaxHeight())
                 Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     // Ekranlar arası kısa fade + hafif dikey kayma.
@@ -332,9 +335,9 @@ private fun Rail(current: Screen, onNavigate: (Screen) -> Unit, modifier: Modifi
                     .clip(RoundedCornerShape(26.dp)).background(c.chip),
             )
             Column(verticalArrangement = Arrangement.spacedBy(RailItemGap), horizontalAlignment = Alignment.CenterHorizontally) {
-                RailApp(PanoIcons.Navigation, "Haritalar", listOf(Color(0xFF5AC8FA), Color(0xFF007AFF))) { Launch.maps(context) }
-                RailApp(PanoIcons.Music, "Müzik", listOf(Color(0xFFFF6482), Color(0xFFFF2D55))) { Launch.music(context, playing?.packageName) }
-                RailApp(PanoIcons.Phone, "Telefon", listOf(Color(0xFF63E07F), Color(0xFF28C840))) { Launch.phone(context) }
+                RailApp(PanoIcons.Navigation, "Haritalar", listOf(Color(0xFF5AC8FA), Color(0xFF007AFF))) { Launch.maps(context, it) }
+                RailApp(PanoIcons.Music, "Müzik", listOf(Color(0xFFFF6482), Color(0xFFFF2D55))) { Launch.music(context, playing?.packageName, it) }
+                RailApp(PanoIcons.Phone, "Telefon", listOf(Color(0xFF63E07F), Color(0xFF28C840))) { Launch.phone(context, it) }
                 RailApp(PanoIcons.Fan, "Klima", listOf(Color(0xFFFFB340), Color(0xFFFF8A00))) { toggle(Screen.Climate) }
                 // Sürüşte soluklaşır; dokununca sürüş uyarısı açılır.
                 RailApp(PanoIcons.Apps, "Uygulamalar", listOf(Color(0xFF9A9AA0), Color(0xFF48484A)), dimmed = driving) { toggle(Screen.Apps) }
@@ -375,14 +378,18 @@ private fun SignalBars(c: GlassColors) {
 private val RailItemSize = 88.dp
 private val RailItemGap = 4.dp
 
-/** CarPlay uygulama ikonu: renk geçişli yumuşak kare. Etkin olanın vurgusunu Rail çizer (kayan kutu). */
+/**
+ * CarPlay uygulama ikonu: renk geçişli yumuşak kare. Etkin olanın vurgusunu Rail çizer (kayan kutu).
+ * [onClick] ikonun ekrandaki yerini alır; başka uygulama açan öğeler onu oradan büyüterek açar.
+ */
 @Composable
-private fun RailApp(icon: ImageVector, label: String, tint: List<Color>, dimmed: Boolean = false, onClick: () -> Unit) {
+private fun RailApp(icon: ImageVector, label: String, tint: List<Color>, dimmed: Boolean = false, onClick: (LaunchAnchor?) -> Unit) {
     val tile = RoundedCornerShape(18.dp)
     val fade by animateFloatAsState(if (dimmed) 0.35f else 1f, tween(MotionMs), label = "soluk")
+    val source = rememberLaunchSource()
     Box(
-        Modifier.pressScale().size(RailItemSize).graphicsLayer { alpha = fade }.clip(RoundedCornerShape(26.dp))
-            .clickable(role = Role.Button, onClick = onClick)
+        Modifier.pressScale().size(RailItemSize).launchSource(source).graphicsLayer { alpha = fade }.clip(RoundedCornerShape(26.dp))
+            .clickable(role = Role.Button) { onClick(source.anchor()) }
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
@@ -501,11 +508,14 @@ private fun FavoritesStrip(c: GlassColors, modifier: Modifier) {
             )
         } else {
             favorites.forEach { app ->
-                AppIcon(
-                    app.packageName, app.className, 56.dp,
-                    Modifier.pressScale().clip(RoundedCornerShape(23)).semantics { contentDescription = app.label }
-                        .clickable(role = Role.Button) { Launch.app(context, app.packageName, app.className) },
-                )
+                key(app.packageName, app.className) {
+                    val source = rememberLaunchSource()
+                    AppIcon(
+                        app.packageName, app.className, 56.dp,
+                        Modifier.pressScale().launchSource(source).clip(RoundedCornerShape(23)).semantics { contentDescription = app.label }
+                            .clickable(role = Role.Button) { Launch.app(context, app.packageName, app.className, source.anchor()) },
+                    )
+                }
             }
         }
     }
@@ -526,17 +536,22 @@ private fun MapWidget(modifier: Modifier) {
 
     Box(modifier.clip(shape).background(if (c.dark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
         LiveMap(Modifier.fillMaxSize(), dark = c.dark, showLocation = granted, bottomInset = 0.24f)
-        Box(Modifier.fillMaxSize().clickable(role = Role.Button) { Launch.maps(context) })
+        // Navigasyon uygulaması dokunulan yerden (harita, manevra kartı ya da arama çubuğu) büyüyerek açılır.
+        val mapSrc = rememberLaunchSource()
+        val barSrc = rememberLaunchSource()
+        Box(Modifier.fillMaxSize().launchSource(mapSrc).clickable(role = Role.Button) { Launch.maps(context, mapSrc.anchor()) })
 
         val nav by NavHub.state.collectAsState()
         val step = nav
         if (step != null) {
             // Navigasyon uygulaması rota veriyorsa: CarPlay'deki yeşil manevra kartı.
-            ManeuverCard(step, Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth()) { Launch.maps(context) }
+            ManeuverCard(step, Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth().launchSource(barSrc)) {
+                Launch.maps(context, barSrc.anchor())
+            }
         } else Row(
-            Modifier.align(Alignment.TopStart).padding(16.dp).pressScale(0.97f).fillMaxWidth().height(60.dp)
+            Modifier.align(Alignment.TopStart).padding(16.dp).pressScale(0.97f).fillMaxWidth().height(60.dp).launchSource(barSrc)
                 .clip(RoundedCornerShape(30.dp)).background(c.overMap)
-                .clickable(role = Role.Button) { Launch.maps(context) }
+                .clickable(role = Role.Button) { Launch.maps(context, barSrc.anchor()) }
                 .padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -806,10 +821,11 @@ private fun NowPlayingWidget(modifier: Modifier) {
 
     Column(modifier.glass(c).padding(24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            val artSrc = rememberLaunchSource()
             Box(
-                Modifier.pressScale().size(96.dp).shadow(12.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp))
+                Modifier.pressScale().size(96.dp).launchSource(artSrc).shadow(12.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp))
                     .background(Brush.linearGradient(listOf(Color(0xFFFF6482), Color(0xFFBF5AF2))))
-                    .clickable(role = Role.Button) { Launch.music(context, p?.packageName) },
+                    .clickable(role = Role.Button) { Launch.music(context, p?.packageName, artSrc.anchor()) },
                 contentAlignment = Alignment.Center,
             ) {
                 val art = p?.art

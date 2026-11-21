@@ -103,10 +103,13 @@ fun BigNumber(text: String, size: TextUnit = 56.sp, color: Color = LocalPano.cur
  * "Renkli" stilde her uygulama kendi renginde yuvarlatılmış bir kare olur.
  */
 @Composable
-fun DockItem(icon: ImageVector, label: String, onClick: () -> Unit, active: Boolean = false, tileColor: Color = Color.Gray) {
+fun DockItem(
+    icon: ImageVector, label: String, onClick: () -> Unit, active: Boolean = false, tileColor: Color = Color.Gray,
+    modifier: Modifier = Modifier,
+) {
     val colors = LocalPano.current
     val style = LocalStyle.current
-    val base = Modifier
+    val base = modifier
         .width(96.dp)
         .height(72.dp)
         .clip(RoundedCornerShape(22.dp))

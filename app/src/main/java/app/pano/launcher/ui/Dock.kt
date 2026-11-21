@@ -46,9 +46,13 @@ fun Dock(climate: ClimateState, current: Screen, onNavigate: (Screen) -> Unit) {
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally)) {
             fun toggle(target: Screen) = onNavigate(if (current == target) Screen.Home else target)
             DockItem(PanoIcons.Apps, "Uygulamalar", { toggle(Screen.Apps) }, active = current == Screen.Apps, tileColor = Color(0xFF3A3A3C))
-            DockItem(PanoIcons.Navigation, "Harita", { Launch.maps(context) }, tileColor = Color(0xFF0A84FF))
-            DockItem(PanoIcons.Music, "Müzik", { Launch.music(context, playing?.packageName) }, tileColor = Color(0xFFFF375F))
-            DockItem(PanoIcons.Phone, "Telefon", { Launch.phone(context) }, tileColor = Color(0xFF30D158))
+            // Uygulamalar dokunulan ikonun yerinden büyüyerek açılır.
+            val mapsSrc = rememberLaunchSource()
+            val musicSrc = rememberLaunchSource()
+            val phoneSrc = rememberLaunchSource()
+            DockItem(PanoIcons.Navigation, "Harita", { Launch.maps(context, mapsSrc.anchor()) }, tileColor = Color(0xFF0A84FF), modifier = Modifier.launchSource(mapsSrc))
+            DockItem(PanoIcons.Music, "Müzik", { Launch.music(context, playing?.packageName, musicSrc.anchor()) }, tileColor = Color(0xFFFF375F), modifier = Modifier.launchSource(musicSrc))
+            DockItem(PanoIcons.Phone, "Telefon", { Launch.phone(context, phoneSrc.anchor()) }, tileColor = Color(0xFF30D158), modifier = Modifier.launchSource(phoneSrc))
             DockItem(PanoIcons.Fan, "Klima", { toggle(Screen.Climate) }, active = current == Screen.Climate, tileColor = Color(0xFFFF9F0A))
             DockItem(PanoIcons.Sliders, "Ayarlar", { toggle(Screen.Settings) }, active = current == Screen.Settings, tileColor = Color(0xFF8E8E93))
         }

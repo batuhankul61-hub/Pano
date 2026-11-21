@@ -185,9 +185,10 @@ private fun NowPlayingCard(modifier: Modifier) {
 
     PanoCard(modifier, padding = 20.dp) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            val artSrc = rememberLaunchSource()
             Box(
-                Modifier.fillMaxHeight().aspectRatio(1f).clip(RoundedCornerShape(18.dp)).background(colors.raised)
-                    .clickable { Launch.music(context, playing?.packageName) },
+                Modifier.fillMaxHeight().aspectRatio(1f).launchSource(artSrc).clip(RoundedCornerShape(18.dp)).background(colors.raised)
+                    .clickable { Launch.music(context, playing?.packageName, artSrc.anchor()) },
                 contentAlignment = Alignment.Center,
             ) {
                 val art = playing?.art

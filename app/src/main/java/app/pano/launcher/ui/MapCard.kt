@@ -91,7 +91,9 @@ fun MapCard(modifier: Modifier) {
         LiveMap(Modifier.fillMaxSize(), dark = colors.isDark, showLocation = locationGranted)
 
         // Harita kartı sadece önizleme; dokununca tam navigasyon uygulaması açılır.
-        Box(Modifier.fillMaxSize().clickable(role = Role.Button) { Launch.maps(context) })
+        // Navigasyon uygulaması kartın kendisinden büyüyerek açılır.
+        val mapSrc = rememberLaunchSource()
+        Box(Modifier.fillMaxSize().launchSource(mapSrc).clickable(role = Role.Button) { Launch.maps(context, mapSrc.anchor()) })
 
         // OpenStreetMap lisansı gereği harita verisinin kaynağı görünür olmalı.
         Text(
@@ -134,7 +136,7 @@ fun MapCard(modifier: Modifier) {
             }
             Box(
                 Modifier.height(52.dp).clip(RoundedCornerShape(26.dp)).background(colors.text)
-                    .clickable(role = Role.Button) { Launch.maps(context) }.padding(horizontal = 28.dp),
+                    .clickable(role = Role.Button) { Launch.maps(context, mapSrc.anchor()) }.padding(horizontal = 28.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("Başla", color = colors.inverseText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)

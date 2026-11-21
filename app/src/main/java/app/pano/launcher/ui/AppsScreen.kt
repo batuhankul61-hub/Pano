@@ -154,6 +154,7 @@ fun AppsScreen(onBack: () -> Unit) {
         ) {
             items(shown, key = { it.packageName + "/" + it.className }) { app ->
                 val favorite = favorites.any { it.packageName == app.packageName && it.className == app.className }
+                val source = rememberLaunchSource()
                 Column(
                     Modifier.clip(RoundedCornerShape(20.dp))
                         .combinedClickable(
@@ -168,11 +169,12 @@ fun AppsScreen(onBack: () -> Unit) {
                                 }
                                 Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                             },
-                        ) { Launch.app(context, app.packageName, app.className) }
+                        ) { Launch.app(context, app.packageName, app.className, source.anchor()) }
                         .padding(vertical = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    AppIcon(app.packageName, app.className, 80.dp, favorite = favorite)
+                    // Uygulama tam bu ikonun yerinden büyüyerek açılır.
+                    AppIcon(app.packageName, app.className, 80.dp, Modifier.launchSource(source), favorite = favorite)
                     Text(
                         app.label, color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Medium,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
