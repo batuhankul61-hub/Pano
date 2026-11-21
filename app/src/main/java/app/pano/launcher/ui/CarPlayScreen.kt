@@ -38,14 +38,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -135,24 +134,26 @@ private fun Modifier.glass(c: GlassColors, shape: Shape = RoundedCornerShape(32.
         .background(Brush.verticalGradient(listOf(c.sheen, Color.Transparent)))
         .border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), shape)
 
-private fun DrawScope.blob(color: Color, alpha: Float, center: Offset, radius: Float) =
-    drawCircle(Brush.radialGradient(listOf(color.copy(alpha = alpha), Color.Transparent), center, radius), radius, center)
+private class Blob(val brush: Brush, val center: Offset, val radius: Float)
 
-private fun DrawScope.wallpaper(dark: Boolean) {
-    val w = size.width
-    val h = size.height
+private fun blob(color: Color, alpha: Float, center: Offset, radius: Float) =
+    Blob(Brush.radialGradient(listOf(color.copy(alpha = alpha), Color.Transparent), center, radius), center, radius)
+
+/** Duvar kağıdının fırçaları: bir zemin geçişi ve üstüne yumuşak renk lekeleri. */
+private fun wallpaper(dark: Boolean, w: Float, h: Float): Pair<Brush, List<Blob>> =
     if (dark) {
-        drawRect(Brush.linearGradient(listOf(Color(0xFF060918), Color(0xFF110E33), Color(0xFF240C3E)), Offset.Zero, Offset(w, h)))
-        blob(Color(0xFF2F6BFF), 0.42f, Offset(w * 0.18f, h * 0.05f), w * 0.48f)
-        blob(Color(0xFFB44CFF), 0.34f, Offset(w * 0.88f, h * 0.98f), w * 0.46f)
-        blob(Color(0xFF00C2D1), 0.16f, Offset(w * 0.52f, h * 1.08f), w * 0.36f)
+        Brush.linearGradient(listOf(Color(0xFF060918), Color(0xFF110E33), Color(0xFF240C3E)), Offset.Zero, Offset(w, h)) to listOf(
+            blob(Color(0xFF2F6BFF), 0.42f, Offset(w * 0.18f, h * 0.05f), w * 0.48f),
+            blob(Color(0xFFB44CFF), 0.34f, Offset(w * 0.88f, h * 0.98f), w * 0.46f),
+            blob(Color(0xFF00C2D1), 0.16f, Offset(w * 0.52f, h * 1.08f), w * 0.36f),
+        )
     } else {
-        drawRect(Brush.linearGradient(listOf(Color(0xFFE6ECFB), Color(0xFFEFEAFA), Color(0xFFF8ECF3)), Offset.Zero, Offset(w, h)))
-        blob(Color(0xFF7AA7FF), 0.38f, Offset(w * 0.16f, h * 0.04f), w * 0.46f)
-        blob(Color(0xFFD59BFF), 0.32f, Offset(w * 0.9f, h * 0.96f), w * 0.44f)
-        blob(Color(0xFF7FE3E0), 0.24f, Offset(w * 0.5f, h * 1.1f), w * 0.34f)
+        Brush.linearGradient(listOf(Color(0xFFE6ECFB), Color(0xFFEFEAFA), Color(0xFFF8ECF3)), Offset.Zero, Offset(w, h)) to listOf(
+            blob(Color(0xFF7AA7FF), 0.38f, Offset(w * 0.16f, h * 0.04f), w * 0.46f),
+            blob(Color(0xFFD59BFF), 0.32f, Offset(w * 0.9f, h * 0.96f), w * 0.44f),
+            blob(Color(0xFF7FE3E0), 0.24f, Offset(w * 0.5f, h * 1.1f), w * 0.34f),
+        )
     }
-}
 
 @Composable
 private fun rememberClock(): State<Long> = produceState(System.currentTimeMillis()) {
@@ -166,7 +167,18 @@ private fun rememberClock(): State<Long> = produceState(System.currentTimeMillis
 @Composable
 fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit) {
     val dark = LocalPano.current.isDark
-    Box(Modifier.fillMaxSize().drawBehind { wallpaper(dark) }.windowInsetsPadding(WindowInsets.safeDrawing)) {
+    // drawWithCache: duvar kağıdı yalnızca boyut ya da tema değişince yeniden hesaplanır, her karede değil.
+    Box(
+        Modifier.fillMaxSize()
+            .drawWithCache {
+                val (base, blobs) = wallpaper(dark, size.width, size.height)
+                onDrawBehind {
+                    drawRect(base)
+                    blobs.forEach { drawCircle(it.brush, it.radius, it.center) }
+                }
+            }
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+    ) {
         DesignCanvas {
             Row(Modifier.fillMaxSize().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 Rail(screen, onNavigate, Modifier.width(116.dp).fillMaxHeight())

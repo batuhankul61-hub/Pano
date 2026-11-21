@@ -75,10 +75,13 @@ fun PanoApp(screen: Screen, onNavigate: (Screen) -> Unit) {
     BackHandler { onNavigate(Screen.Home) }
 
     // Geliştirici modunda seçilebilen CarPlay / iOS havasındaki cam arayüz.
-    if (LocalStyle.current.layout == LayoutStyle.CarPlay) {
-        CarPlayApp(screen, climate, onNavigate)
-    } else {
-        ClassicApp(screen, climate, onNavigate)
+    // Harita tüm ekranlar ve iki düzen arasında paylaşılıyor; geçişlerde yeniden yüklenmiyor.
+    app.pano.launcher.ui.ProvideMapHolder {
+        if (LocalStyle.current.layout == LayoutStyle.CarPlay) {
+            CarPlayApp(screen, climate, onNavigate)
+        } else {
+            ClassicApp(screen, climate, onNavigate)
+        }
     }
 }
 

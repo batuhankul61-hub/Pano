@@ -8,6 +8,9 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Looper
+import android.view.ViewGroup
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -140,15 +143,30 @@ fun MapCard(modifier: Modifier) {
     }
 }
 
-/** MapLibre haritasını Compose içine yerleştirir ve ekran yaşam döngüsüne bağlar. */
+/**
+ * Uygulama boyunca yaşayan tek harita. Eskiden ana ekrandan her çıkışta harita yok edilip dönüşte
+ * stil ve karolar baştan yükleniyordu; bu ekran geçişlerinde 100+ ms takılmaya yol açıyordu.
+ * Artık harita bir kez oluşturuluyor, ekranlar arasında yalnızca yerinden alınıp geri takılıyor.
+ */
+class MapHolder internal constructor(val view: MapView) {
+    internal var map: MapLibreMap? = null
+    internal var styleUrl: String? = null
+    internal var locationRequested = false
+    internal var locationOn = false
+}
+
+private val LocalMapHolder = staticCompositionLocalOf<MapHolder?> { null }
+
+/** Haritayı activity ömrü boyunca tutar; PanoApp tüm ekranları bununla sarar. */
 @Composable
-internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, bottomInset: Float = 0.33f) {
+fun ProvideMapHolder(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val mapView = remember {
+    val holder = remember {
         MapLibre.getInstance(context)
-        MapView(context).apply { onCreate(null) }
+        MapHolder(MapView(context).apply { onCreate(null) })
     }
+    val mapView = holder.view
 
     DisposableEffect(lifecycleOwner, mapView) {
         var started = false
@@ -171,13 +189,23 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
         }
     }
 
-    // Harita hazır olup konum katmanı açıldığında dolar; konum güncellemeleri buraya iletilir.
-    var locationMap by remember { mutableStateOf<MapLibreMap?>(null) }
+    CompositionLocalProvider(LocalMapHolder provides holder, content = content)
+}
 
-    val dayStyle = LocalStyle.current.map.dayUrl
-    LaunchedEffect(mapView, dark, showLocation, dayStyle) {
-        locationMap = null
+/** Paylaşılan haritayı bu karta yerleştirir. Stil ve konum katmanı yalnızca gerçekten değişince yeniden kurulur. */
+@Composable
+internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, bottomInset: Float = 0.33f) {
+    val context = LocalContext.current
+    val holder = checkNotNull(LocalMapHolder.current) { "LiveMap, ProvideMapHolder içinde kullanılmalı" }
+    val mapView = holder.view
+
+    // Harita hazır olup konum katmanı açıldığında dolar; konum güncellemeleri buraya iletilir.
+    var locationMap by remember { mutableStateOf(if (holder.locationOn) holder.map else null) }
+
+    val styleUrl = if (dark) STYLE_NIGHT else LocalStyle.current.map.dayUrl
+    LaunchedEffect(styleUrl, showLocation, bottomInset) {
         mapView.getMapAsync { map ->
+            holder.map = map
             map.uiSettings.apply {
                 setAllGesturesEnabled(false)
                 isLogoEnabled = false
@@ -185,13 +213,28 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
                 // Atıf yazısını kartın köşesinde kendimiz gösteriyoruz (MapCard).
                 isAttributionEnabled = false
             }
-            // Alttaki "Navigasyon" kartı haritanın üçte birini kapatıyor; merkezi görünen kısma kaydır.
-            map.setPadding(0, 0, 0, (mapView.height * bottomInset).toInt())
+            // Kartın altındaki panel haritanın bir kısmını kapatıyor; merkezi görünen kısma kaydır.
+            // Yeniden takılan harita henüz ölçülmemiş olabilir, bu yüzden yerleşimden sonra ayarlanıyor.
+            mapView.post {
+                map.setPadding(0, 0, 0, (mapView.height * bottomInset).toInt())
+                map.triggerRepaint() // yeniden takılan yüzey boş kalmasın
+            }
             if (map.cameraPosition.zoom < 3) {
                 map.cameraPosition = CameraPosition.Builder().target(FALLBACK).zoom(13.0).build()
             }
-            map.setStyle(Style.Builder().fromUri(if (dark) STYLE_NIGHT else dayStyle)) { style ->
-                if (showLocation && enableLocation(context, map, style)) locationMap = map
+            if (holder.styleUrl == styleUrl && holder.locationRequested == showLocation) {
+                if (holder.locationOn) locationMap = map
+                return@getMapAsync
+            }
+            holder.styleUrl = styleUrl
+            holder.locationRequested = showLocation
+            holder.locationOn = false
+            locationMap = null
+            map.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
+                if (showLocation && enableLocation(context, map, style)) {
+                    holder.locationOn = true
+                    locationMap = map
+                }
             }
         }
     }
@@ -207,7 +250,8 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
         onDispose { stop() }
     }
 
-    AndroidView(factory = { mapView }, modifier = modifier)
+    // Önceki karttan kalan üst görünümden ayırıp buraya tak.
+    AndroidView(factory = { mapView.also { (it.parent as? ViewGroup)?.removeView(it) } }, modifier = modifier)
 }
 
 @SuppressLint("MissingPermission")

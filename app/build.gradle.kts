@@ -17,7 +17,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 kodu küçültür ve optimize eder; Compose release'de debug'a göre belirgin şekilde akıcı çalışır.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Şimdilik debug anahtarıyla imzalanıyor; mağazaya çıkmadan önce gerçek anahtar eklenmeli.
             signingConfig = signingConfigs.getByName("debug")
         }
