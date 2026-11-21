@@ -63,6 +63,7 @@ object BydClimate {
                 return@launch
             }
             Log.i(TAG, "BYD klima bağlandı: $first")
+            withContext(Dispatchers.IO) { VehicleFeatures.readByd() }
             s.step = 1f
             s.minTemp = 17f
             s.maxTemp = 33f
