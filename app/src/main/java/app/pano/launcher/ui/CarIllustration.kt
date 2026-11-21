@@ -1,9 +1,18 @@
 package app.pano.launcher.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import app.pano.launcher.vehicle.VehicleImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -32,12 +41,29 @@ private const val REAR_X = 154f
 private const val FRONT_X = 482f
 
 /**
- * Yandan görünüş kompakt SUV çizimi; oranlar BYD Atto 2'den alındı (boy 4,31 m, dingil mesafesi
- * 2,62 m, yükseklik 1,68 m): kısa kaput, dik arka kapak, kalın D direği, tavan rayları,
- * çamurluk ve marşpiyel kaplamaları, arkada boydan boya stop. Üreticinin görseli değil, özgün çizim.
+ * Araç görseli. BYD araçta, aracın kendi ayar uygulamasındaki model görseli kullanılır
+ * ([VehicleImage]; Pano'ya kopyalanmaz, çalışırken araçtan okunur). Bulunamazsa çizime düşülür.
  */
 @Composable
 fun CarIllustration(modifier: Modifier, dark: Boolean, background: Color) {
+    val context = LocalContext.current
+    val image by produceState<ImageBitmap?>(VehicleImage.cached, context) {
+        if (value == null) value = withContext(Dispatchers.IO) { VehicleImage.load(context) }
+    }
+    val img = image
+    if (img != null) {
+        Image(img, contentDescription = "Araç", contentScale = ContentScale.Fit, modifier = modifier)
+    } else {
+        DrawnCar(modifier, dark, background)
+    }
+}
+
+/**
+ * Yandan görünüş kompakt SUV çizimi; oranlar BYD Atto 2'den alındı (boy 4,31 m, dingil mesafesi
+ * 2,62 m, yükseklik 1,68 m). Araç görseli olmayan cihazlar (emülatör vb.) için yedek.
+ */
+@Composable
+private fun DrawnCar(modifier: Modifier, dark: Boolean, background: Color) {
     val body = remember {
         svg(
             "M60 214 L56 200 C50 196 48 186 48 176 L52 128 C58 96 70 62 88 40 C92 33 98 30 108 29 " +

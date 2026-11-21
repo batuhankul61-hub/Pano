@@ -2,8 +2,7 @@ package app.pano.launcher.ui
 
 import android.graphics.Rect
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,8 +46,8 @@ object ReturnMotion {
 }
 
 /**
- * Başka bir uygulamadan dönünce içerik hafifçe büyüyerek ve belirerek gelir (iOS'taki gibi).
- * Duvar kağıdı / zemin sabit kalsın diye yalnızca içeriğe uygulanır.
+ * Başka bir uygulamadan dönünce içerik çok hafif bir belirmeyle gelir: belirgin yakınlaşma ya da
+ * yaylanma yok, 180 ms'de biter. Duvar kağıdı / zemin sabit kalsın diye yalnızca içeriğe uygulanır.
  */
 fun Modifier.returnZoom(): Modifier = composed {
     val tick = ReturnMotion.tick.intValue
@@ -56,10 +55,10 @@ fun Modifier.returnZoom(): Modifier = composed {
     val alpha = remember { Animatable(1f) }
     LaunchedEffect(tick) {
         if (tick == 0) return@LaunchedEffect
-        scale.snapTo(0.93f)
-        alpha.snapTo(0.4f)
-        launch { alpha.animateTo(1f, tween(220)) }
-        scale.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow))
+        scale.snapTo(0.985f)
+        alpha.snapTo(0.7f)
+        launch { alpha.animateTo(1f, tween(180, easing = FastOutSlowInEasing)) }
+        scale.animateTo(1f, tween(180, easing = FastOutSlowInEasing))
     }
     this.graphicsLayer {
         scaleX = scale.value

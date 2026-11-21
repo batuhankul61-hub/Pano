@@ -21,6 +21,8 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.APP_MUSIC" />
         </intent>
+        <!-- BYD araçta modelin kendi görseli bu eklentiden okunur. -->
+        <package android:name="com.byd.carsettings.plugins" />
     </queries>
 
     <application

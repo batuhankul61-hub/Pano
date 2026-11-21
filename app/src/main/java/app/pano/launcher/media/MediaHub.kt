@@ -88,7 +88,57 @@ object MediaHub {
     fun hasAccess(context: Context): Boolean =
         NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
 
+    private var appContext: Context? = null
+
+    /**
+     * Bazı uygulamalar (Spotify dahil) kapağı resim olarak değil adres olarak verir
+     * (content:// ya da https://). Adres arka planda bir kez yüklenir; gelince durum yeniden yayınlanır.
+     */
+    private var artUri: String? = null
+    private var artBitmap: Bitmap? = null
+    private val artLoader = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    private fun artFromUri(meta: MediaMetadata?): Bitmap? {
+        val uri = meta?.let {
+            it.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
+                ?: it.getString(MediaMetadata.METADATA_KEY_ART_URI)
+                ?: it.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI)
+                ?: it.description?.iconUri?.toString()
+        }?.takeIf { it.isNotBlank() }
+        if (uri == null) {
+            if (meta != null) android.util.Log.i("MediaHub", "kapak yok; alanlar: ${meta.keySet()}")
+            return null
+        }
+        if (uri == artUri) return artBitmap
+        artUri = uri
+        artBitmap = null
+        val context = appContext ?: return null
+        artLoader.execute {
+            val bmp = runCatching { loadArt(context, uri) }.getOrNull()
+            mainHandler.post {
+                if (artUri == uri && bmp != null) {
+                    artBitmap = bmp
+                    publish()
+                }
+            }
+        }
+        return null
+    }
+
+    private fun loadArt(context: Context, uri: String): Bitmap? {
+        val stream = if (uri.startsWith("http")) {
+            (java.net.URL(uri).openConnection() as java.net.HttpURLConnection).apply {
+                connectTimeout = 5000
+                readTimeout = 5000
+            }.inputStream
+        } else {
+            context.contentResolver.openInputStream(android.net.Uri.parse(uri))
+        }
+        return stream?.use { android.graphics.BitmapFactory.decodeStream(it) }
+    }
+
     fun start(context: Context) {
+        appContext = context.applicationContext
         if (listening || !hasAccess(context)) return
         val manager = context.getSystemService(MediaSessionManager::class.java) ?: return
         val component = ComponentName(context, MediaListenerService::class.java)
@@ -124,7 +174,9 @@ object MediaHub {
             artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)
                 ?: meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST).orEmpty(),
             art = meta?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-                ?: meta?.getBitmap(MediaMetadata.METADATA_KEY_ART),
+                ?: meta?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                ?: meta?.description?.iconBitmap
+                ?: artFromUri(meta),
             isPlaying = playback?.state == PlaybackState.STATE_PLAYING,
             positionMs = playback?.position ?: 0L,
             positionUpdatedAt = playback?.lastPositionUpdateTime ?: 0L,
