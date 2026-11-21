@@ -44,7 +44,7 @@ import app.pano.launcher.vehicle.longTemp
 fun ClimateScreen(climate: ClimateState, onBack: () -> Unit) {
     val colors = LocalPano.current
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-        ScreenHeader("Klima", onBack, subtitle = "Önizleme · araca gönderilmiyor") {
+        ScreenHeader("Klima", onBack, subtitle = if (climate.linked) "Araca bağlı" else "Önizleme · araca gönderilmiyor") {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 PillToggle("Otomatik", climate.auto) { climate.auto = !climate.auto }
                 PillToggle("A/C", climate.ac) { climate.ac = !climate.ac }
@@ -53,19 +53,22 @@ fun ClimateScreen(climate: ClimateState, onBack: () -> Unit) {
         }
 
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            // Tek bölgeli klimada tek sıcaklık paneli; koltuk ısıtma yalnızca araçta varsa.
             ZonePanel(
-                title = "Sürücü", temp = climate.driver,
+                title = if (climate.dualZone) "Sürücü" else "Kabin", temp = climate.driver,
                 onDown = { climate.changeDriver(-0.5f) }, onUp = { climate.changeDriver(0.5f) },
-                seat = climate.driverSeat, onSeat = { climate.driverSeat = it },
+                seat = climate.driverSeat.takeIf { climate.seatHeating }, onSeat = { climate.driverSeat = it },
                 badge = null, modifier = Modifier.weight(1f).fillMaxHeight(),
             )
             CenterPanel(climate, Modifier.weight(1.25f).fillMaxHeight())
-            ZonePanel(
-                title = "Yolcu", temp = climate.passenger,
-                onDown = { climate.changePassenger(-0.5f) }, onUp = { climate.changePassenger(0.5f) },
-                seat = climate.passengerSeat, onSeat = { climate.passengerSeat = it },
-                badge = if (climate.sync) "Senkron" else null, modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
+            if (climate.dualZone) {
+                ZonePanel(
+                    title = "Yolcu", temp = climate.passenger,
+                    onDown = { climate.changePassenger(-0.5f) }, onUp = { climate.changePassenger(0.5f) },
+                    seat = climate.passengerSeat.takeIf { climate.seatHeating }, onSeat = { climate.passengerSeat = it },
+                    badge = if (climate.sync) "Senkron" else null, modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+            }
         }
     }
 }
@@ -83,7 +86,7 @@ private fun ZonePanel(
     temp: Float,
     onDown: () -> Unit,
     onUp: () -> Unit,
-    seat: Int,
+    seat: Int?,
     onSeat: (Int) -> Unit,
     badge: String?,
     modifier: Modifier,
@@ -109,8 +112,10 @@ private fun ZonePanel(
             BigNumber(longTemp(temp), size = 108.sp, color = tempColor(temp, colors.text), weight = FontWeight.Light)
             RoundIconButton(PanoIcons.ChevronDown, "$title sıcaklığını düşür", onDown, Color.Transparent, colors.secondary, size = 72.dp, iconSize = 30.dp)
         }
-        CardLabel(PanoIcons.Seat, "Koltuk ısıtma", modifier = Modifier.padding(bottom = 12.dp))
-        Segmented(listOf("Kapalı", "1", "2", "3"), seat, onSeat)
+        if (seat != null) {
+            CardLabel(PanoIcons.Seat, "Koltuk ısıtma", modifier = Modifier.padding(bottom = 12.dp))
+            Segmented(listOf("Kapalı", "1", "2", "3"), seat, onSeat)
+        }
     }
 }
 
@@ -120,8 +125,11 @@ private fun CenterPanel(climate: ClimateState, modifier: Modifier) {
     PanoCard(modifier, padding = 30.dp) {
         CardLabel(null, "Hava yönü", modifier = Modifier.padding(bottom = 14.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ModeTile("Yüz", PanoIcons.AirFace, climate.face, Modifier.weight(1f)) { climate.face = !climate.face; climate.auto = false }
-            ModeTile("Ayak", PanoIcons.AirFeet, climate.foot, Modifier.weight(1f)) { climate.foot = !climate.foot; climate.auto = false }
+            // Yüz/ayak henüz araca gönderilmiyor; araca bağlıyken boşuna gösterilmez.
+            if (climate.airDirectionSupported) {
+                ModeTile("Yüz", PanoIcons.AirFace, climate.face, Modifier.weight(1f)) { climate.face = !climate.face; climate.auto = false }
+                ModeTile("Ayak", PanoIcons.AirFeet, climate.foot, Modifier.weight(1f)) { climate.foot = !climate.foot; climate.auto = false }
+            }
             ModeTile("Buğu çözme", PanoIcons.Defrost, climate.defrost, Modifier.weight(1f)) { climate.defrost = !climate.defrost; climate.auto = false }
         }
 
@@ -152,8 +160,10 @@ private fun CenterPanel(climate: ClimateState, modifier: Modifier) {
         Box(Modifier.weight(1f))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            ToggleTile("Senkron", "Sürücü ile senkronize et", PanoIcons.Sync, climate.sync, Modifier.weight(1f)) {
-                climate.setSyncEnabled(it)
+            if (climate.dualZone) {
+                ToggleTile("Senkron", "Sürücü ile senkronize et", PanoIcons.Sync, climate.sync, Modifier.weight(1f)) {
+                    climate.setSyncEnabled(it)
+                }
             }
             ToggleTile("İç hava", "İç hava sirkülasyonu", PanoIcons.Recirculation, climate.recirculation, Modifier.weight(1f)) {
                 climate.recirculation = it

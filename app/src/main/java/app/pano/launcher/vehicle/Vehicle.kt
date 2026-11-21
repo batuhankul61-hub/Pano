@@ -62,12 +62,29 @@ class ClimateState {
     var recirculation by mutableStateOf(false)
     var rearDefrost by mutableStateOf(false)
 
+    /**
+     * Araçta ne var: tek bölgeli klimada tek sıcaklık gösterilir, koltuk ısıtma yoksa gizlenir.
+     * Bilinmeyen cihazlarda (önizleme) her şey açık.
+     */
+    var dualZone by mutableStateOf(true)
+    var seatHeating by mutableStateOf(true)
+
+    /** Araca bağlıyken yalnızca araca gerçekten giden ayarlar gösterilir (yüz/ayak henüz gitmiyor). */
+    val airDirectionSupported: Boolean get() = !linked
+
     val isOff: Boolean get() = fan == 0
 
     /** [delta] yalnızca yön bildirir; adım [step] kadardır. */
-    fun changeDriver(delta: Float) {
-        driver = clamp(driver + if (delta > 0) step else -step)
-        if (sync) passenger = driver
+    fun changeDriver(delta: Float) = setDriverTemp(driver + if (delta > 0) step else -step)
+
+    /** Sürgüden gelen sıcaklık; adıma yuvarlanır. Tek bölgede ya da senkronda yolcu da izler. */
+    fun setDriverTemp(t: Float) {
+        driver = clamp(t)
+        if (sync || !dualZone) passenger = driver
+    }
+
+    fun setPassengerTemp(t: Float) {
+        if (sync || !dualZone) setDriverTemp(t) else passenger = clamp(t)
     }
 
     fun changePassenger(delta: Float) {

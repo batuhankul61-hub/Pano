@@ -56,10 +56,13 @@ fun Dock(climate: ClimateState, current: Screen, onNavigate: (Screen) -> Unit) {
             DockItem(PanoIcons.Fan, "Klima", { toggle(Screen.Climate) }, active = current == Screen.Climate, tileColor = Color(0xFFFF9F0A))
             DockItem(PanoIcons.Sliders, "Ayarlar", { toggle(Screen.Settings) }, active = current == Screen.Settings, tileColor = Color(0xFF8E8E93))
         }
-        TempStepper(
-            value = climate.passenger, off = climate.isOff, who = "Yolcu",
-            onDown = { climate.changePassenger(-0.5f) }, onUp = { climate.changePassenger(0.5f) },
-        )
+        // Tek bölgeli klimada yolcu sıcaklığı ayrıca gösterilmez.
+        if (climate.dualZone) {
+            TempStepper(
+                value = climate.passenger, off = climate.isOff, who = "Yolcu",
+                onDown = { climate.changePassenger(-0.5f) }, onUp = { climate.changePassenger(0.5f) },
+            )
+        }
     }
 }
 

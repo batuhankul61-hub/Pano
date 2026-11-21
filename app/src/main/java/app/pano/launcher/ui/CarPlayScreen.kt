@@ -85,6 +85,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import app.pano.launcher.PanelHost
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -918,7 +919,11 @@ private fun ConsumptionWidget(modifier: Modifier) {
 private fun ClimateStrip(climate: ClimateState, onOpen: () -> Unit, modifier: Modifier) {
     val c = glass()
     Row(modifier.glass(c, RoundedCornerShape(30.dp)).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        TempControl(climate.driver, climate.isOff, "Sürücü", { climate.changeDriver(-0.5f) }, { climate.changeDriver(0.5f) })
+        // Tek bölgeli klimada tek, geniş bir sürgü; çift bölgede sürücü ve yolcu ayrı.
+        TempSlider(
+            climate.driver, climate, if (climate.dualZone) "Sürücü" else "Sıcaklık",
+            Modifier.width(if (climate.dualZone) 300.dp else 420.dp),
+        ) { climate.setDriverTemp(it) }
         Row(
             Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
@@ -941,22 +946,62 @@ private fun ClimateStrip(climate: ClimateState, onOpen: () -> Unit, modifier: Mo
             }
             Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronUp, "Klima ayrıntıları", onOpen, c.chip, c.text, size = 58.dp, iconSize = 22.dp) }
         }
-        TempControl(climate.passenger, climate.isOff, "Yolcu", { climate.changePassenger(-0.5f) }, { climate.changePassenger(0.5f) })
+        if (climate.dualZone) {
+            TempSlider(climate.passenger, climate, "Yolcu", Modifier.width(300.dp)) { climate.setPassengerTemp(it) }
+        }
     }
 }
 
+/**
+ * Parmakla kaydırılan sıcaklık sürgüsü: soldan sağa soğuktan sıcağa. Dokunulan yere atlar,
+ * sürüklerken adım adım değişir (araçta 1°). Klima kapalıyken de son sıcaklık soluk gösterilir.
+ */
 @Composable
-private fun TempControl(value: Float, off: Boolean, who: String, onDown: () -> Unit, onUp: () -> Unit) {
+private fun TempSlider(value: Float, climate: ClimateState, label: String, modifier: Modifier, onChange: (Float) -> Unit) {
     val c = glass()
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronLeft, "$who sıcaklığını düşür", onDown, c.chip, c.text, size = 56.dp, iconSize = 22.dp) }
-        Text(
-            if (off) "—" else shortTemp(value),
-            color = c.text, fontSize = 34.sp, fontWeight = FontWeight.Normal, letterSpacing = (-1).sp,
-            textAlign = TextAlign.Center, modifier = Modifier.width(100.dp),
+    val min = climate.minTemp
+    val max = climate.maxTemp
+    val fraction = ((value - min) / (max - min)).coerceIn(0f, 1f)
+    val shown by animateFloatAsState(fraction, tween(120), label = "sürgü")
+    val shape = RoundedCornerShape(29.dp)
+
+    fun valueAt(x: Float, width: Int): Float = min + (x / width).coerceIn(0f, 1f) * (max - min)
+
+    Box(
+        modifier.height(58.dp).clip(shape).background(c.chip)
+            .pointerInput(min, max) {
+                detectTapGestures { onChange(valueAt(it.x, size.width)) }
+            }
+            .pointerInput(min, max) {
+                detectHorizontalDragGestures { change, _ ->
+                    change.consume()
+                    onChange(valueAt(change.position.x, size.width))
+                }
+            }
+            .semantics { contentDescription = "$label sıcaklığı ${shortTemp(value)}" },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        // Dolgu: mavi (soğuk) → turuncu (sıcak); kapalıyken soluk.
+        Box(
+            Modifier.fillMaxHeight().fillMaxWidth(shown.coerceAtLeast(0.08f)).clip(shape)
+                .graphicsLayer { alpha = if (climate.isOff) 0.35f else 1f }
+                .background(Brush.horizontalGradient(listOf(Color(0xFF4AA8FF), Color(0xFFFFB340), Color(0xFFFF6A3D)), startX = 0f)),
         )
-        Box(Modifier.pressScale()) { RoundIconButton(PanoIcons.ChevronRight, "$who sıcaklığını artır", onUp, c.chip, c.text, size = 56.dp, iconSize = 22.dp) }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = c.text.copy(alpha = 0.75f), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(
+                tempLabel(value, climate),
+                color = c.text.copy(alpha = if (climate.isOff) 0.5f else 1f),
+                fontSize = 28.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.8).sp,
+            )
+        }
     }
+}
+
+/** Araçtaki gibi: aralığın üst ucu "Hi" (BYD 33 °C'yi böyle gösteriyor). */
+private fun tempLabel(t: Float, climate: ClimateState): String = when {
+    climate.linked && t >= climate.maxTemp -> "Hi"
+    else -> shortTemp(t)
 }
 
 @Composable

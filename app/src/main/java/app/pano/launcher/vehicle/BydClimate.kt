@@ -63,7 +63,9 @@ object BydClimate {
                 return@launch
             }
             Log.i(TAG, "BYD klima bağlandı: $first")
-            withContext(Dispatchers.IO) { VehicleFeatures.readByd() }
+            val features = withContext(Dispatchers.IO) { VehicleFeatures.readByd() }
+            s.dualZone = features.dualZoneClimate
+            s.seatHeating = features.seatHeating
             s.step = 1f
             s.minTemp = 17f
             s.maxTemp = 33f
