@@ -12,3 +12,4 @@ captures/
 *.keystore
 keystore.properties
 .claude/settings.local.json
+.claude/worktrees/
