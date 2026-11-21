@@ -85,6 +85,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.animation.core.snap
 import app.pano.launcher.RecentApps
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.combinedClickable
@@ -1014,32 +1016,48 @@ private fun ClimateStrip(climate: ClimateState, onOpen: () -> Unit, modifier: Mo
 }
 
 /**
- * Parmakla kaydırılan sıcaklık sürgüsü: soldan sağa soğuktan sıcağa. Dokunulan yere atlar,
- * sürüklerken adım adım değişir (araçta 1°). Klima kapalıyken de son sıcaklık soluk gösterilir.
+ * Parmakla kaydırılan sıcaklık sürgüsü: soldan sağa soğuktan sıcağa. Sürüklerken yalnızca
+ * ekranda, parmağı izleyerek hareket eder; parmak kalkınca son değer araca tek komutla gider
+ * (ara değerler araca gönderilmez, araçtan gelen okuma da sürüklerken sürgüyü geri çekmez).
+ * Dokunulan yere atlar. Klima kapalıyken de son sıcaklık soluk gösterilir.
  */
 @Composable
 private fun TempSlider(value: Float, climate: ClimateState, label: String, modifier: Modifier, onChange: (Float) -> Unit) {
     val c = glass()
     val min = climate.minTemp
     val max = climate.maxTemp
-    val fraction = ((value - min) / (max - min)).coerceIn(0f, 1f)
-    val shown by animateFloatAsState(fraction, tween(120), label = "sürgü")
+    val step = climate.step
+    // Sürükleme sırasındaki değer; null = sürüklenmiyor, gerçek değer gösterilir.
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    val raw = dragging ?: value
+    val snapped = (Math.round(raw / step) * step).coerceIn(min, max)
+    val fraction = ((raw - min) / (max - min)).coerceIn(0f, 1f)
+    // Sürüklerken gecikmesiz, bırakınca yumuşak.
+    val shown by animateFloatAsState(fraction, if (dragging != null) snap() else tween(160), label = "sürgü")
     val shape = RoundedCornerShape(29.dp)
+    val commit by rememberUpdatedState(onChange)
 
     fun valueAt(x: Float, width: Int): Float = min + (x / width).coerceIn(0f, 1f) * (max - min)
 
     Box(
         modifier.height(58.dp).clip(shape).background(c.chip)
             .pointerInput(min, max) {
-                detectTapGestures { onChange(valueAt(it.x, size.width)) }
+                detectTapGestures { commit(valueAt(it.x, size.width)) }
             }
             .pointerInput(min, max) {
-                detectHorizontalDragGestures { change, _ ->
+                detectHorizontalDragGestures(
+                    onDragStart = { dragging = valueAt(it.x, size.width) },
+                    onDragEnd = {
+                        dragging?.let { commit(it) }
+                        dragging = null
+                    },
+                    onDragCancel = { dragging = null },
+                ) { change, _ ->
                     change.consume()
-                    onChange(valueAt(change.position.x, size.width))
+                    dragging = valueAt(change.position.x, size.width)
                 }
             }
-            .semantics { contentDescription = "$label sıcaklığı ${shortTemp(value)}" },
+            .semantics { contentDescription = "$label sıcaklığı ${shortTemp(snapped)}" },
         contentAlignment = Alignment.CenterStart,
     ) {
         // Dolgu: mavi (soğuk) → turuncu (sıcak); kapalıyken soluk.
@@ -1051,7 +1069,7 @@ private fun TempSlider(value: Float, climate: ClimateState, label: String, modif
         Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(label, color = c.text.copy(alpha = 0.75f), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             Text(
-                tempLabel(value, climate),
+                tempLabel(snapped, climate),
                 color = c.text.copy(alpha = if (climate.isOff) 0.5f else 1f),
                 fontSize = 28.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.8).sp,
             )

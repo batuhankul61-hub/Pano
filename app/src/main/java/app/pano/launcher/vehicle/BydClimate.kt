@@ -48,6 +48,7 @@ object BydClimate {
 
     @Volatile private var last: Car? = null
     @Volatile private var lastWriteAt = 0L
+    @Volatile private var dualZone = true
     private var attached = false
 
     /** BYD araçtaysa eşlemeyi başlatır; değilse hiçbir şey yapmaz. Ana iş parçacığından çağrılmalı. */
@@ -65,6 +66,7 @@ object BydClimate {
             Log.i(TAG, "BYD klima bağlandı: $first")
             val features = withContext(Dispatchers.IO) { VehicleFeatures.readByd() }
             s.dualZone = features.dualZoneClimate
+            dualZone = features.dualZoneClimate
             s.seatHeating = features.seatHeating
             s.step = 1f
             s.minTemp = 17f
@@ -151,21 +153,31 @@ object BydClimate {
         fun send(fields: List<String>, vararg values: Int) =
             BydBus.write(AC_DEVICE, "Ac", fields + "AC_CTRL_SOURCE_SET", values + SOURCE_UI)
 
+        // Sıcaklık klima kapalıyken de gönderilir (araç ayarı saklar; açılınca o sıcaklıkla başlar).
+        fun sendTemps() {
+            if (w.driver != car.driver) {
+                send(listOf("AC_TEMPERATURE_UNIT_SET", "AC_TEMP_MAIN_SET", "AC_TEMP_DEPUTY_SET", "AC_TEMP_REAR_SET"), UNIT_CELSIUS, w.driver, 0, 0)
+            }
+            // Tek bölgede yolcu sürücüyü izler; ayrıca gönderilmez.
+            if (w.passenger != car.passenger && dualZone) {
+                send(listOf("AC_TEMPERATURE_UNIT_SET", "AC_TEMP_MAIN_SET", "AC_TEMP_DEPUTY_SET", "AC_TEMP_REAR_SET"), UNIT_CELSIUS, 0, w.passenger, 0)
+            }
+        }
+
         if (!w.power) {
             if (car.power) send(listOf("AC_POWER_STATE_SET"), 0)
+            sendTemps()
             // Kapanırken diğer düğmeler (A/C, otomatik) araca ayrıca gönderilmez.
-            return car.copy(power = false, defrost = w.defrost, rearDefrost = w.rearDefrost).also {
+            return car.copy(
+                power = false, driver = w.driver, passenger = w.passenger,
+                defrost = w.defrost, rearDefrost = w.rearDefrost,
+            ).also {
                 if (w.defrost != car.defrost) send(listOf("AC_DEFROST_FRONT_STATE_SET"), w.defrost.bit)
                 if (w.rearDefrost != car.rearDefrost) send(listOf("AC_DEFROST_REAR_STATE_SET"), w.rearDefrost.bit)
             }
         }
         if (!car.power) send(listOf("AC_POWER_STATE_SET"), 1)
-        if (w.driver != car.driver) {
-            send(listOf("AC_TEMPERATURE_UNIT_SET", "AC_TEMP_MAIN_SET", "AC_TEMP_DEPUTY_SET", "AC_TEMP_REAR_SET"), UNIT_CELSIUS, w.driver, 0, 0)
-        }
-        if (w.passenger != car.passenger) {
-            send(listOf("AC_TEMPERATURE_UNIT_SET", "AC_TEMP_MAIN_SET", "AC_TEMP_DEPUTY_SET", "AC_TEMP_REAR_SET"), UNIT_CELSIUS, 0, w.passenger, 0)
-        }
+        sendTemps()
         if (w.auto != car.auto) send(listOf("AC_CTRL_MODE_SET"), if (w.auto) 0 else 1)
         // Otomatik moda geçerken fanı araç seçer; elle seviye yalnızca manuelde gönderilir.
         if (!w.auto && w.wind != car.wind) send(listOf("AC_WIND_LEVEL_SET"), w.wind)
