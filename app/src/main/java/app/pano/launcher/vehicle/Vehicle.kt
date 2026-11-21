@@ -9,9 +9,9 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Araç bilgileri. BYD'nin araç servislerine henüz bağlı değiliz; bu yüzden şimdilik
- * örnek değerler gösteriliyor ve ekranda "Önizleme" etiketi var. Gerçek bağlantı
- * yazıldığında yalnızca bu dosyanın değişmesi yeterli olacak.
+ * Eski, sabit araç bilgisi. Gerçek veri artık [VehicleHub.state]'ten geliyor; bu sınıf
+ * yalnızca henüz hub'a bağlanmamış CarPlay düzeni için duruyor (hep örnek değer,
+ * `isPreview = true`). CarPlay bağlandığında silinebilir.
  */
 data class VehicleInfo(
     val name: String,
@@ -23,14 +23,16 @@ data class VehicleInfo(
 )
 
 object VehicleSource {
-    fun current(): VehicleInfo = VehicleInfo(
-        name = "Aracım",
-        rangeKm = 412,
-        batteryPercent = 78,
-        locked = true,
-        consumptionKwh100 = 14.8f,
-        isPreview = true,
-    )
+    fun current(): VehicleInfo = VehicleHub.PREVIEW.let {
+        VehicleInfo(
+            name = it.name,
+            rangeKm = it.rangeKm ?: 0,
+            batteryPercent = it.batteryPercent ?: 0,
+            locked = it.locked ?: true,
+            consumptionKwh100 = it.consumptionKwh100 ?: 0f,
+            isPreview = true,
+        )
+    }
 }
 
 /** Klima ayarları. Şimdilik sadece ekranda tutuluyor, araca gönderilmiyor. */

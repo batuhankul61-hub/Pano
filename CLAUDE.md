@@ -30,7 +30,10 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 - `ui/theme/Theme.kt`: `PanoColors` (gece/gündüz), `activeColor()`, `linkColor()`.
 - `settings/StyleSettings.kt`: stil ayarları (SharedPreferences). Kalıcı ayarlar için örnek alınacak yapı.
 - Veri katmanları `StateFlow` ile sunulur: `media/MediaHub.kt` (çalan müzik, bildirim dinleyicisi `MediaListenerService`), `navigation/NavHub.kt` (Maps/Yandex/Waze bildiriminden manevra), `weather/WeatherHub.kt` (Open-Meteo), `vehicle/ClimateStore.kt` (klima kalıcılığı).
-- `vehicle/Vehicle.kt`: araç verileri hâlâ **örnek değerler** (`isPreview = true`); gerçek BYD bağlantısı yok.
+- `vehicle/VehicleHub.kt`: araç verisi (`state`, türetilmiş `isDriving`). Sıra: BYD veri yolu (`vehicle/BydBus.kt`, ESMER-UI'den MIT ile uyarlandı) → hız için GPS → örnek değerler + `isPreview = true`. Alanlar null = bilinmiyor. `Vehicle.kt`'deki `VehicleSource` yalnızca henüz bağlanmamış CarPlay için duruyor.
+  - BYD veri yolu ek izin istemiyor (ESMER-UI'ye göre); logcat etiketi `VehicleHub`/`BydBus`.
+  - Emülatörde `adb emu geo fix` GNSS'e ulaşmıyor; GPS hızını test sağlayıcıyla dene: `adb shell appops set com.android.shell android:mock_location allow`, `adb shell cmd location providers add-test-provider gps`, `... set-test-provider-enabled gps true`, sonra saniyede bir `... set-test-provider-location gps --location 41.0082,28.9784` (her seferinde konumu biraz kaydır). Bitince `remove-test-provider gps`.
+  - Worktree'de `local.properties` yok; derlemeden önce ana checkout'tan kopyala.
 
 ## Kurallar
 
