@@ -75,6 +75,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                         "Bildirim erişimi",
                         if (MediaHub.hasAccess(context)) "Açık · çalan şarkı gösteriliyor" else "Kapalı · çalan şarkı görünmez",
                     ) { Launch.notificationAccess(context) }
+                    Divider()
+                    SwitchRowSetting(
+                        "Mesaj bildirimlerini göster",
+                        "WhatsApp ve SMS mesajları ekranın üstünde kısa süre görünür",
+                        style.showMessages,
+                    ) { on -> Settings.update { it.copy(showMessages = on) } }
                 }
 
                 Group("Geliştirici") {

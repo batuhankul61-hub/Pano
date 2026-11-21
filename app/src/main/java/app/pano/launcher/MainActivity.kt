@@ -77,10 +77,14 @@ fun PanoApp(screen: Screen, onNavigate: (Screen) -> Unit) {
     // Geliştirici modunda seçilebilen CarPlay / iOS havasındaki cam arayüz.
     // Harita tüm ekranlar ve iki düzen arasında paylaşılıyor; geçişlerde yeniden yüklenmiyor.
     app.pano.launcher.ui.ProvideMapHolder {
-        if (LocalStyle.current.layout == LayoutStyle.CarPlay) {
-            CarPlayApp(screen, climate, onNavigate)
-        } else {
-            ClassicApp(screen, climate, onNavigate)
+        Box(Modifier.fillMaxSize()) {
+            if (LocalStyle.current.layout == LayoutStyle.CarPlay) {
+                CarPlayApp(screen, climate, onNavigate)
+            } else {
+                ClassicApp(screen, climate, onNavigate)
+            }
+            // WhatsApp / SMS mesajları her iki düzenin üstünde kısa bir banner olarak görünür.
+            app.pano.launcher.ui.MessageBanner()
         }
     }
 }
