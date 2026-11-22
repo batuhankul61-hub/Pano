@@ -311,31 +311,64 @@ object PanoNav {
 
     // ---- Sesli yönlendirme --------------------------------------------------
 
-    /** Türkçe ses motoru varsa konuşur; yoksa sessiz kalır (ekran yine yönlendirir). */
+    private val _voice = MutableStateFlow<Boolean?>(null)
+
+    /**
+     * Sesli yönlendirme durumu: true = Türkçe konuşabiliyor, false = Türkçe ses motoru yok
+     * (BYD'de Google servisleri ve TTS motoru gelmiyor), null = henüz denenmedi.
+     */
+    val voice: StateFlow<Boolean?> = _voice.asStateFlow()
+
+    /**
+     * Türkçe ses motoru varsa konuşur; yoksa sessiz kalır (ekran yine yönlendirir).
+     * Sistem varsayılanı Türkçe bilmiyorsa kurulu diğer motorlar sırayla denenir
+     * (ör. sonradan kurulan SherpaTTS ya da eSpeak NG); ayar değiştirmek gerekmez.
+     */
     private val speaker = object {
         private var tts: TextToSpeech? = null
         private var ready = false
         private var audio: AudioManager? = null
         private var focus: AudioFocusRequest? = null
+        private val main = android.os.Handler(Looper.getMainLooper())
 
         fun open(context: Context) {
             if (tts != null) return
             audio = context.getSystemService(AudioManager::class.java)
-            tts = TextToSpeech(context.applicationContext) { status ->
-                val t = tts ?: return@TextToSpeech
-                val lang = if (status == TextToSpeech.SUCCESS) t.setLanguage(Locale("tr", "TR")) else TextToSpeech.LANG_NOT_SUPPORTED
-                ready = lang >= TextToSpeech.LANG_AVAILABLE
-                Log.i(TAG, "sesli yönlendirme: ${if (ready) "Türkçe hazır" else "Türkçe ses yok ($status/$lang)"}")
-                t.setAudioAttributes(
-                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build(),
-                )
-                t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(id: String?) = duck(true)
-                    override fun onDone(id: String?) = duck(false)
-                    @Deprecated("API 21") override fun onError(id: String?) = duck(false)
-                })
+            tryEngine(context.applicationContext, null, mutableSetOf())
+        }
+
+        /** [engine] null = sistem varsayılanı. Türkçe yoksa denenmemiş bir sonraki motora geçer. */
+        private fun tryEngine(app: Context, engine: String?, tried: MutableSet<String?>) {
+            tried += engine
+            var created: TextToSpeech? = null
+            // Motor hiç yoksa geri çağrı yapıcının içinden gelir; atama bitsin diye sıraya alınır.
+            created = TextToSpeech(app, { status -> main.post { onInit(app, created, status, tried) } }, engine)
+            tts = created
+        }
+
+        private fun onInit(app: Context, t: TextToSpeech?, status: Int, tried: MutableSet<String?>) {
+            if (t == null || tts !== t) { t?.shutdown(); return }  // bu arada kapatıldı
+            val lang = if (status == TextToSpeech.SUCCESS) t.setLanguage(Locale("tr", "TR")) else TextToSpeech.LANG_NOT_SUPPORTED
+            ready = lang >= TextToSpeech.LANG_AVAILABLE
+            if (!ready) {
+                val next = runCatching { t.engines.map { it.name } }.getOrDefault(emptyList()).firstOrNull { it !in tried }
+                Log.i(TAG, "sesli yönlendirme: ${tried.last() ?: "varsayılan"} motorunda Türkçe yok ($status/$lang); sıradaki: $next")
+                t.shutdown()
+                tts = null
+                if (next != null) tryEngine(app, next, tried) else _voice.value = false
+                return
             }
+            Log.i(TAG, "sesli yönlendirme: Türkçe hazır (${tried.last() ?: t.defaultEngine})")
+            _voice.value = true
+            t.setAudioAttributes(
+                AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build(),
+            )
+            t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String?) = duck(true)
+                override fun onDone(id: String?) = duck(false)
+                @Deprecated("API 21") override fun onError(id: String?) = duck(false)
+            })
         }
 
         /** Konuşurken müziğin sesini kıs. */
@@ -362,6 +395,7 @@ object PanoNav {
         }
 
         fun close() {
+            main.removeCallbacksAndMessages(null)
             tts?.stop()
             tts?.shutdown()
             tts = null

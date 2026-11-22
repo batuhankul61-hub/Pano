@@ -1204,6 +1204,15 @@ private fun RouteSummary(s: NavSession, onSearch: () -> Unit, onStarted: () -> U
                             }
                         }
                     }
+                    // Araçta ses motoru yoksa sessizliğin sebebi açıkça yazılır.
+                    val voice by PanoNav.voice.collectAsState()
+                    if (voice == false) {
+                        Text(
+                            "Sesli yönlendirme yok: araçta Türkçe ses motoru kurulu değil",
+                            color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                    }
                 }
             }
         }
