@@ -51,6 +51,9 @@ object NavHub {
         "ru.yandex.yandexnavi",              // Yandex Navigasyon
         "ru.yandex.yandexmaps",              // Yandex Haritalar (navigasyon modu)
         "com.waze",                          // Waze
+        // A Better Routeplanner. Yalnızca ARM kütüphanesi var, x86 emülatörde açılmıyor;
+        // bildirim düzeni araçta doğrulanmadı (ayrıştırma içeriğe baktığı için büyük ihtimalle uyar).
+        "com.iternio.abrpapp",
     )
 
     private val _state = MutableStateFlow<NavInstruction?>(null)
