@@ -317,6 +317,48 @@ internal object BydSignals {
 
     @Volatile private var loggedOpenings = false
 
+    /**
+     * Aracın kendi TPMS uyarıları (`BYDAutoTyreDevice` / `BYDAutoInstrumentDevice` sabitleri):
+     *  - `TYRE_AIR_LEAK_STATE_*`: 0 normal, 1 hızlı kaçak, 2 yavaş kaçak
+     *  - `TYRE_PRESSURE_STATE_*`: 0 normal, 1 yüksek basınç, 2 düşük basınç
+     *  - `INSTRUMENT_2IN1_*_TYRE_COLOR`: göstergedeki renk, 1 beyaz, 2 sarı, 3 kırmızı
+     *  - `TYRE_SYSTEM_STATE`: 3 = sistem arızası
+     * Hiçbir sinyal okunamazsa null (arayüz uyarı göstermez).
+     */
+    fun tyreAlerts(): TyreAlerts? {
+        var anyRead = false
+        fun read(group: String, field: String) = BydBus.readInt(group, field)?.also { anyRead = true }
+        fun corner(area: String, short: String): TyreAlert? {
+            val leak = read("Tyre", "TYRE_AIR_LEAK_STATE_$area")
+            val state = read("Tyre", "TYRE_PRESSURE_STATE_$area")
+            val color = read("Instrument", "INSTRUMENT_2IN1_${short}_TYRE_COLOR")
+            val red = color == 3
+            return when {
+                leak == 1 -> TyreAlert("Hızlı hava kaçağı", severe = true)
+                leak == 2 -> TyreAlert("Yavaş hava kaçağı", severe = red)
+                state == 2 -> TyreAlert("Düşük basınç", severe = red)
+                state == 1 -> TyreAlert("Yüksek basınç", severe = red)
+                red -> TyreAlert("Lastik uyarısı", severe = true)
+                color == 2 -> TyreAlert("Lastik uyarısı", severe = false)
+                else -> null
+            }
+        }
+        val alerts = TyreAlerts(
+            frontLeft = corner("LEFT_FRONT", "LF"),
+            frontRight = corner("RIGHT_FRONT", "RF"),
+            rearLeft = corner("LEFT_REAR", "LB"),
+            rearRight = corner("RIGHT_REAR", "RB"),
+            systemFault = read("Tyre", "TYRE_SYSTEM_STATE") == 3,
+        )
+        if (!loggedTyres) {
+            loggedTyres = true
+            Log.i("BydBus", "TPMS ilk okuma: $alerts (okunan sinyal var: $anyRead)")
+        }
+        return alerts.takeIf { anyRead }
+    }
+
+    @Volatile private var loggedTyres = false
+
     fun tyresKpa(): TyrePressures? {
         fun corner(c: String) = BydBus.readInt("Instrument", "INSTRUMENT_2IN1_${c}_TYRE_PRESSURE")
             ?.takeIf { it > 0 }?.let { Math.round(it * PSI_TENTHS_TO_KPA) }

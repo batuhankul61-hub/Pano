@@ -37,6 +37,24 @@ data class TyrePressures(val frontLeft: Int?, val frontRight: Int?, val rearLeft
 data class Consumption(val kwh100: Float, val recentWindow: Boolean)
 
 /**
+ * Aracın kendi lastik basıncı izleme (TPMS) uyarısı; Pano eşik uydurmaz. [severe] true ise
+ * kırmızı (hızlı kaçak ya da göstergede kırmızı), değilse turuncu.
+ */
+data class TyreAlert(val label: String, val severe: Boolean)
+
+/** Köşe başına TPMS uyarısı (null = uyarı yok ya da bilinmiyor) ve sistem arızası. */
+data class TyreAlerts(
+    val frontLeft: TyreAlert? = null,
+    val frontRight: TyreAlert? = null,
+    val rearLeft: TyreAlert? = null,
+    val rearRight: TyreAlert? = null,
+    val systemFault: Boolean = false,
+) {
+    val all: List<TyreAlert> get() = listOfNotNull(frontLeft, frontRight, rearLeft, rearRight)
+    val any: Boolean get() = all.isNotEmpty() || systemFault
+}
+
+/**
  * Gövde açıklıkları (kapılar, bagaj, kaput, camlar, sunroof). Her alan null = bilinmiyor
  * (araçta yok ya da okunamadı). Kapılarda true = açık; camlarda değer açıklık yüzdesidir (0 = kapalı).
  */
@@ -105,6 +123,8 @@ data class VehicleState(
     val consumption: Consumption? = null,
     /** Kapı/bagaj/cam durumu; önizlemede her zaman null (uydurma "kapalı" gösterilmez). */
     val openings: Openings? = null,
+    /** Aracın TPMS uyarıları; sinyal yoksa null ve arayüz yalnızca değeri gösterir. */
+    val tyreAlerts: TyreAlerts? = null,
 ) {
     val consumptionKwh100: Float? get() = consumption?.kwh100
 }
@@ -174,12 +194,14 @@ object VehicleHub {
         val insideTempC: Int? = null,
         val tyresKpa: TyrePressures? = null,
         val consumption: Consumption? = null,
+        val tyreAlerts: TyreAlerts? = null,
     )
 
     private fun readSlow() = runCatching {
         SlowReadings(
             BydSignals.outsideTempC(), BydSignals.insideTempC(), BydSignals.tyresKpa(),
             runCatching { BydSignals.consumption() }.getOrNull(),
+            runCatching { BydSignals.tyreAlerts() }.getOrNull(),
         )
     }.getOrDefault(SlowReadings())
 
@@ -208,6 +230,7 @@ object VehicleHub {
             insideTempC = slow.insideTempC,
             tyresKpa = slow.tyresKpa,
             consumption = slow.consumption,
+            tyreAlerts = slow.tyreAlerts,
             // Kapı açılınca hemen görünsün diye her turda okunur.
             openings = runCatching { BydSignals.openings() }.getOrNull(),
         )

@@ -131,6 +131,7 @@ import app.pano.launcher.vehicle.ClimateState
 import app.pano.launcher.vehicle.Gear
 import app.pano.launcher.vehicle.Opening
 import app.pano.launcher.vehicle.SpeedSource
+import app.pano.launcher.vehicle.TyreAlert
 import app.pano.launcher.vehicle.VehicleHub
 import app.pano.launcher.vehicle.decimal
 import app.pano.launcher.vehicle.shortTemp
@@ -1466,21 +1467,41 @@ private fun TyreBatteryWidget(modifier: Modifier) {
     val c = glass()
     val v by VehicleHub.state.collectAsState()
     val t = v.tyresKpa
-    Row(modifier.glass(c).padding(horizontal = 22.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    // Uyarı yalnızca aracın kendi TPMS sinyalinden gelir; Pano basınç eşiği uydurmaz.
+    val alerts = v.tyreAlerts
+    val alertColor = when {
+        alerts == null || !alerts.any -> null
+        alerts.all.any { it.severe } || alerts.all.isEmpty() -> Accent.Red
+        else -> TyreWarn
+    }
+    val shape = RoundedCornerShape(32.dp)
+    Row(
+        modifier.glass(c, shape)
+            .then(if (alertColor != null) Modifier.border(2.dp, alertColor, shape) else Modifier)
+            .padding(horizontal = 22.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Column(Modifier.weight(1f).fillMaxHeight()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("LASTİKLER", color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                Text("LASTİKLER", color = alertColor ?: c.secondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
                 Text("kPa", color = c.secondary.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 6.dp))
+                val reason = alerts?.all?.firstOrNull()?.label ?: if (alerts?.systemFault == true) "TPMS arızası" else null
+                if (reason != null && alertColor != null) {
+                    Text(
+                        reason, color = alertColor, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
             }
             Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TyreValue(t?.frontLeft, c)
-                    TyreValue(t?.rearLeft, c)
+                    TyreValue(t?.frontLeft, alerts?.frontLeft, c)
+                    TyreValue(t?.rearLeft, alerts?.rearLeft, c)
                 }
                 CarTopView(c, Modifier.padding(horizontal = 12.dp).width(34.dp).height(70.dp))
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TyreValue(t?.frontRight, c)
-                    TyreValue(t?.rearRight, c)
+                    TyreValue(t?.frontRight, alerts?.frontRight, c)
+                    TyreValue(t?.rearRight, alerts?.rearRight, c)
                 }
             }
         }
@@ -1500,9 +1521,22 @@ private fun TyreBatteryWidget(modifier: Modifier) {
 }
 
 @Composable
-private fun TyreValue(kpa: Int?, c: GlassColors) {
-    Text(kpa?.toString() ?: "—", color = if (kpa != null) c.text else c.secondary, fontSize = 22.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.3).sp)
+private fun TyreValue(kpa: Int?, alert: TyreAlert?, c: GlassColors) {
+    val color = when {
+        alert?.severe == true -> Accent.Red
+        alert != null -> TyreWarn
+        kpa != null -> c.text
+        else -> c.secondary
+    }
+    Text(
+        kpa?.toString() ?: "—", color = color, fontSize = 22.sp,
+        fontWeight = if (alert != null) FontWeight.Bold else FontWeight.Medium, letterSpacing = (-0.3).sp,
+        modifier = Modifier.semantics { if (alert != null) contentDescription = "${kpa ?: "—"} kPa, ${alert.label}" },
+    )
 }
+
+/** TPMS uyarısının hafif (turuncu) rengi. */
+private val TyreWarn = Color(0xFFFF9F0A)
 
 /** Üstten bakışta sade araç: gövde çizgisi ve dört tekerlek. */
 @Composable
