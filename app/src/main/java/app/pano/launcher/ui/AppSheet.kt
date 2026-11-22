@@ -26,19 +26,32 @@ object AppSheet {
     var music by mutableStateOf(false)
         private set
 
+    /** Sağ ekranda Pano navigasyonunun "Nereye?" ekranı (arama, rota önizleme) açık mı. */
+    var nav by mutableStateOf(false)
+        private set
+
     fun open(title: String, url: String) {
         music = false
+        nav = false
         page = Page(title, url)
     }
 
     fun openMusic() {
         page = null
+        nav = false
         music = true
+    }
+
+    fun openNav() {
+        page = null
+        music = false
+        nav = true
     }
 
     fun close() {
         page = null
         music = false
+        nav = false
     }
 
     /** Panelde açılabilen web uygulamaları (adada sabit durur). */

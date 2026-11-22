@@ -60,6 +60,18 @@ object PanoIcons {
             "M13.4 12.8c2.7.9 5.3 3.6 4 5.8-1.2 2.1-4.6.4-4.9-4.6" +
             "M10.6 12.8c-2.1 1.9-5.7 2.9-7 .6-1.2-2.1 2-4.1 6.5-1.9",
     )
+    // Navigasyon manevra okları (kalın çizgi: manevra kartında uzaktan okunsun).
+    val TurnRight = line("turn.right", "M7 20v-7a4 4 0 0 1 4-4h8M15 5l4 4-4 4", 2.2f)
+    val TurnLeft = line("turn.left", "M17 20v-7a4 4 0 0 0-4-4H5M9 5L5 9l4 4", 2.2f)
+    val SlightRight = line("turn.slight.right", "M8 20v-6l8-8M10 6h6v6", 2.2f)
+    val SlightLeft = line("turn.slight.left", "M16 20v-6L8 6M14 6H8v6", 2.2f)
+    val Straight = line("straight", "M12 20V5M7 10l5-5 5 5", 2.2f)
+    val UTurn = line("uturn", "M16 20V9a4 4 0 0 0-8 0v6M4 11l4 4 4-4", 2.2f)
+    val Roundabout = line("roundabout", circle(12f, 9f, 3.5f) + "M12 12.5V20M14.6 6.4l3.4-3.4M18 7V3h-4", 2.2f)
+    val Flag = line("flag", "M6 21V4M6 4h11l-2 4 2 4H6", 2.2f)
+    val Pin = line("pin", "M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z" + circle(12f, 10f, 2.3f))
+    val Clock = line("clock", circle(12f, 12f, 8.5f) + "M12 7.5V12l3 2")
+
     /** Mikrofon: sesli asistan. */
     val Mic = line("mic", "M9 6.5a3 3 0 0 1 6 0V12a3 3 0 0 1-6 0zM5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3")
 

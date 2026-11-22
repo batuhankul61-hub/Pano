@@ -87,6 +87,14 @@ import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
 import app.pano.launcher.settings.DockStore
 import app.pano.launcher.settings.LocalStyle
+import app.pano.launcher.navigation.NavPhase
+import app.pano.launcher.navigation.NavSession
+import app.pano.launcher.navigation.PanoNav
+import app.pano.launcher.navigation.RouteEngine
+import app.pano.launcher.navigation.formatDistance
+import app.pano.launcher.navigation.formatDuration
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.focus.focusRequester
 import app.pano.launcher.settings.DockControl
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.layout.widthIn
@@ -500,6 +508,7 @@ private sealed interface RightContent {
     data class Web(val page: AppSheet.Page) : RightContent
     data class Native(val screen: Screen) : RightContent
     data object Music : RightContent
+    data object Nav : RightContent
 }
 
 /**
@@ -518,12 +527,14 @@ private fun RightScreenHost(screen: Screen, onNavigate: (Screen) -> Unit, modifi
     // Aynı anda tek içerik: yerel ekran seçilince web kapanır, web açılınca yerel ekran kapanır.
     LaunchedEffect(screen) { if (native) AppSheet.close() }
     val music = AppSheet.music
-    LaunchedEffect(page, music) { if ((page != null || music) && native) onNavigate(Screen.Home) }
+    val navPanel = AppSheet.nav
+    LaunchedEffect(page, music, navPanel) { if ((page != null || music || navPanel) && native) onNavigate(Screen.Home) }
 
     val target: RightContent? = when {
         native -> RightContent.Native(screen)
         page != null -> RightContent.Web(page)
         music -> RightContent.Music
+        navPanel -> RightContent.Nav
         else -> null
     }
     fun close() = if (native) onNavigate(Screen.Home) else AppSheet.close()
@@ -591,6 +602,16 @@ private fun RightScreenHost(screen: Screen, onNavigate: (Screen) -> Unit, modifi
                         RoundIconButton(PanoIcons.Close, "Kapat", { close() }, Color.Transparent, c.secondary, size = 56.dp, iconSize = 22.dp)
                     }
                     NowPlayingScreen(Modifier.fillMaxSize().padding(start = 36.dp, end = 36.dp, bottom = 32.dp))
+                }
+                RightContent.Nav -> Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier.fillMaxWidth().height(68.dp).then(dragToClose).padding(start = 28.dp, end = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Nereye?", color = c.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        RoundIconButton(PanoIcons.Close, "Kapat", { close() }, Color.Transparent, c.secondary, size = 56.dp, iconSize = 22.dp)
+                    }
+                    NavScreen(Modifier.fillMaxSize().padding(start = 28.dp, end = 28.dp, bottom = 24.dp)) { close() }
                 }
                 is RightContent.Web -> Column(Modifier.fillMaxSize()) {
                     val p = content.page
@@ -795,19 +816,42 @@ private fun MapWidget(modifier: Modifier) {
         // Navigasyon uygulaması dokunulan yerden (harita, manevra kartı ya da arama çubuğu) büyüyerek açılır.
         val mapSrc = rememberLaunchSource()
         val barSrc = rememberLaunchSource()
-        Box(Modifier.fillMaxSize().launchSource(mapSrc).clickable(role = Role.Button) { Launch.maps(context, mapSrc.anchor()) })
+        LaunchedEffect(Unit) { PanoNav.init(context) }
+        val own by PanoNav.state.collectAsState()
+        val session = own?.takeIf { it.phase != NavPhase.Preview && it.route != null }
+        // Pano navigasyonu sürerken haritaya dokunmak Nereye? ekranını açar; yoksa navigasyon uygulamasını.
+        Box(
+            Modifier.fillMaxSize().launchSource(mapSrc).clickable(role = Role.Button) {
+                if (session != null) AppSheet.openNav() else Launch.maps(context, mapSrc.anchor())
+            },
+        )
 
         val nav by NavHub.state.collectAsState()
         val step = nav
-        if (step != null) {
+        if (session != null) {
+            // Pano'nun kendi yönlendirmesi: sıradaki manevra, altta varış ve "Bitir".
+            val route = session.route!!
+            val p = session.progress
+            val m = route.maneuvers[(p?.nextIndex ?: 0).coerceIn(0, route.maneuvers.lastIndex)]
+            val arrived = session.phase == NavPhase.Arrived
+            ManeuverCard(
+                distance = if (arrived) null else p?.let { formatDistance(it.distanceToNextM) },
+                title = if (arrived) "Vardınız: ${session.destination.name}" else m.instruction,
+                eta = if (session.rerouting) "Rota yeniden hesaplanıyor…" else null,
+                vector = if (arrived) PanoIcons.Flag else maneuverIcon(m.type),
+                modifier = Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth(),
+            ) { AppSheet.openNav() }
+            NavBottomBar(session, Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 40.dp).fillMaxWidth())
+        } else if (step != null) {
             // Navigasyon uygulaması rota veriyorsa: CarPlay'deki yeşil manevra kartı.
-            ManeuverCard(step, Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth().launchSource(barSrc)) {
-                Launch.maps(context, barSrc.anchor())
-            }
+            ManeuverCard(
+                distance = step.distance, title = step.street ?: step.maneuver, eta = step.eta, bitmap = step.icon,
+                modifier = Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth().launchSource(barSrc),
+            ) { Launch.maps(context, barSrc.anchor()) }
         } else Row(
-            Modifier.align(Alignment.TopStart).padding(16.dp).pressScale(0.97f).fillMaxWidth().height(60.dp).launchSource(barSrc)
+            Modifier.align(Alignment.TopStart).padding(16.dp).pressScale(0.97f).fillMaxWidth().height(60.dp)
                 .clip(RoundedCornerShape(30.dp)).background(c.overMap)
-                .clickable(role = Role.Button) { Launch.maps(context, barSrc.anchor()) }
+                .clickable(role = Role.Button) { AppSheet.openNav() }
                 .padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -844,7 +888,15 @@ private fun MapWidget(modifier: Modifier) {
 }
 
 @Composable
-private fun ManeuverCard(step: NavInstruction, modifier: Modifier, onClick: () -> Unit) {
+private fun ManeuverCard(
+    distance: String?,
+    title: String,
+    eta: String?,
+    modifier: Modifier,
+    bitmap: android.graphics.Bitmap? = null,
+    vector: ImageVector? = null,
+    onClick: () -> Unit,
+) {
     val shape = RoundedCornerShape(26.dp)
     Column(
         modifier.pressScale(0.97f).shadow(16.dp, shape).clip(shape)
@@ -853,28 +905,264 @@ private fun ManeuverCard(step: NavInstruction, modifier: Modifier, onClick: () -
             .padding(horizontal = 20.dp, vertical = 16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            val icon = step.icon
-            if (icon != null) {
-                Image(icon.asImageBitmap(), contentDescription = null, modifier = Modifier.size(52.dp))
+            if (bitmap != null) {
+                Image(bitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.size(52.dp))
             } else {
-                Icon(PanoIcons.Navigation, contentDescription = null, tint = Color.White, modifier = Modifier.size(44.dp))
+                Icon(vector ?: PanoIcons.Navigation, contentDescription = null, tint = Color.White, modifier = Modifier.size(52.dp))
             }
             Column(Modifier.weight(1f).padding(start = 16.dp)) {
-                if (step.distance != null) {
-                    Text(step.distance, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp, lineHeight = 32.sp)
+                if (distance != null) {
+                    Text(distance, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp, lineHeight = 32.sp)
                 }
                 Text(
-                    step.street ?: step.maneuver, color = Color.White.copy(alpha = 0.92f),
+                    title, color = Color.White.copy(alpha = 0.92f),
                     fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        if (step.eta != null) {
+        if (eta != null) {
             Text(
-                step.eta, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                eta, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp, fontWeight = FontWeight.Medium,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp),
             )
         }
+    }
+}
+
+/** Valhalla manevra türüne göre ok. */
+private fun maneuverIcon(type: Int): ImageVector = when (type) {
+    4, 5, 6 -> PanoIcons.Flag
+    9, 18, 20, 23, 37 -> PanoIcons.SlightRight
+    10, 11 -> PanoIcons.TurnRight
+    12, 13 -> PanoIcons.UTurn
+    14, 15 -> PanoIcons.TurnLeft
+    16, 19, 21, 24, 38 -> PanoIcons.SlightLeft
+    26, 27 -> PanoIcons.Roundabout
+    else -> PanoIcons.Straight
+}
+
+/** "15:42" biçiminde varış saati. */
+private fun arrivalClock(remainingS: Double): String =
+    SimpleDateFormat("HH:mm", tr).format(Date(System.currentTimeMillis() + (remainingS * 1000).toLong()))
+
+/** Yönlendirme sırasında haritanın altında: varış saati, kalan süre/mesafe ve "Bitir". */
+@Composable
+private fun NavBottomBar(session: NavSession, modifier: Modifier) {
+    val c = glass()
+    val route = session.route ?: return
+    val remainingS = session.progress?.remainingS ?: route.timeS
+    val remainingM = session.progress?.remainingM ?: route.lengthM
+    Row(
+        modifier.height(72.dp).clip(RoundedCornerShape(24.dp)).background(c.overMap).padding(start = 22.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(arrivalClock(remainingS), color = c.text, fontSize = 24.sp, fontWeight = FontWeight.Bold, lineHeight = 26.sp)
+            Text(
+                "${formatDuration(remainingS)} · ${formatDistance(remainingM)}", color = c.secondary,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+            )
+        }
+        Box(
+            Modifier.pressScale().height(56.dp).clip(RoundedCornerShape(28.dp)).background(Color(0xFFFF453A))
+                .clickable(role = Role.Button) { PanoNav.stop() }.padding(horizontal = 26.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Bitir", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/**
+ * Sağ ekrandaki "Nereye?": üstte arama kutusu; yazarken sonuçlar, boşken son gidilenler.
+ * Bir yer seçilince rota önizlemesi (süre, mesafe, varış) ve "Başlat". Yönlendirme sürerken
+ * hedef özeti, sıradaki manevralar ve "Navigasyonu bitir".
+ */
+@Composable
+private fun NavScreen(modifier: Modifier, onClose: () -> Unit) {
+    val c = glass()
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { PanoNav.init(context) }
+    val session by PanoNav.state.collectAsState()
+    val recents by PanoNav.recents.collectAsState()
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<app.pano.launcher.navigation.Place>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    // Önizleme ya da yönlendirme varken arama kutusuna yazılırsa yeniden arama moduna geçilir.
+    var forceSearch by remember { mutableStateOf(false) }
+    val here = remember { PanoNav.bestLastKnown(context) ?: PanoNav.lastLocation }
+
+    LaunchedEffect(query) {
+        if (query.trim().length < 2) { results = emptyList(); searching = false; return@LaunchedEffect }
+        searching = true
+        kotlinx.coroutines.delay(350) // yazarken her harfte istek atılmasın
+        results = RouteEngine.search(query, here?.latitude, here?.longitude)
+        searching = false
+    }
+
+    val s = session
+    Column(modifier) {
+        if (s == null || forceSearch || query.isNotEmpty()) {
+            SearchField(query, onChange = { query = it; forceSearch = true }, autoFocus = s == null)
+            val list = if (query.trim().length >= 2) results else recents
+            Text(
+                when {
+                    query.trim().length >= 2 && searching -> "Aranıyor…"
+                    query.trim().length >= 2 && results.isEmpty() -> "Sonuç bulunamadı"
+                    query.trim().length >= 2 -> "Sonuçlar"
+                    recents.isEmpty() -> "Adres, yer ya da işletme adı yaz"
+                    else -> "Son gidilenler"
+                },
+                color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
+                modifier = Modifier.padding(start = 8.dp, top = 18.dp, bottom = 6.dp),
+            )
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                items(list.size) { i ->
+                    val place = list[i]
+                    PlaceRow(place, here, recent = query.trim().length < 2) {
+                        query = ""
+                        forceSearch = false
+                        PanoNav.preview(context, place)
+                    }
+                }
+            }
+        } else {
+            RouteSummary(s, onSearch = { forceSearch = true }, onStarted = onClose)
+        }
+    }
+}
+
+@Composable
+private fun SearchField(query: String, onChange: (String) -> Unit, autoFocus: Boolean) {
+    val c = glass()
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(autoFocus) { if (autoFocus) runCatching { focus.requestFocus() } }
+    Row(
+        Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(32.dp)).background(c.chip).padding(start = 22.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(PanoIcons.Search, contentDescription = null, tint = c.secondary, modifier = Modifier.size(24.dp))
+        Box(Modifier.weight(1f).padding(start = 14.dp), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) Text("Nereye gidiyoruz?", color = c.secondary, fontSize = 21.sp, fontWeight = FontWeight.Medium)
+            androidx.compose.foundation.text.BasicTextField(
+                value = query,
+                onValueChange = onChange,
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = c.text, fontSize = 21.sp, fontWeight = FontWeight.Medium),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(linkColor()),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
+            )
+        }
+        if (query.isNotEmpty()) {
+            RoundIconButton(PanoIcons.Close, "Temizle", { onChange("") }, Color.Transparent, c.secondary, size = 56.dp, iconSize = 20.dp)
+        }
+    }
+}
+
+@Composable
+private fun PlaceRow(place: app.pano.launcher.navigation.Place, here: android.location.Location?, recent: Boolean, onClick: () -> Unit) {
+    val c = glass()
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 76.dp).clip(RoundedCornerShape(20.dp)).clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(48.dp).clip(CircleShape).background(c.chip), contentAlignment = Alignment.Center) {
+            Icon(if (recent) PanoIcons.Clock else PanoIcons.Pin, contentDescription = null, tint = c.text, modifier = Modifier.size(24.dp))
+        }
+        Column(Modifier.weight(1f).padding(start = 16.dp)) {
+            Text(place.name, color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (place.detail.isNotBlank()) {
+                Text(place.detail, color = c.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (here != null) {
+            val d = app.pano.launcher.navigation.distanceM(here.latitude, here.longitude, place.lat, place.lon)
+            Text(formatDistance(d), color = c.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 12.dp))
+        }
+    }
+}
+
+/** Rota önizlemesi ya da süren yönlendirmenin özeti. */
+@Composable
+private fun RouteSummary(s: NavSession, onSearch: () -> Unit, onStarted: () -> Unit) {
+    val c = glass()
+    val context = LocalContext.current
+    val route = s.route
+    Column(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
+        Text(s.destination.name, color = c.text, fontSize = 32.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 36.sp)
+        if (s.destination.detail.isNotBlank()) {
+            Text(s.destination.detail, color = c.secondary, fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.height(22.dp))
+        when {
+            s.loading -> Text("Rota hesaplanıyor…", color = c.secondary, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            s.error != null -> Text(s.error, color = Color(0xFFFF6961), fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            route != null -> {
+                val remainingS = s.progress?.remainingS ?: route.timeS
+                val remainingM = s.progress?.remainingM ?: route.lengthM
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(formatDuration(remainingS), color = Accent.Green, fontSize = 40.sp, fontWeight = FontWeight.Bold, lineHeight = 42.sp)
+                    Text(
+                        "${formatDistance(remainingM)} · varış ${arrivalClock(remainingS)}", color = c.secondary, fontSize = 19.sp,
+                        fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 14.dp, bottom = 5.dp),
+                    )
+                }
+                if (s.phase != NavPhase.Preview) {
+                    // Sıradaki birkaç manevra.
+                    val from = s.progress?.nextIndex ?: 0
+                    Column(Modifier.padding(top = 16.dp)) {
+                        route.maneuvers.drop(from).take(4).forEach { m ->
+                            Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(maneuverIcon(m.type), contentDescription = null, tint = c.text, modifier = Modifier.size(28.dp))
+                                Text(m.instruction, color = c.text, fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 14.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (s.phase == NavPhase.Preview) {
+                NavButton("Başlat", Accent.Green, Color.White, Modifier.weight(1f), enabled = route != null) {
+                    PanoNav.start(context)
+                    onStarted()
+                }
+                if (s.error != null) {
+                    NavButton("Tekrar dene", c.chip, c.text) { PanoNav.preview(context, s.destination) }
+                }
+            } else {
+                NavButton("Navigasyonu bitir", Color(0xFFFF453A), Color.White, Modifier.weight(1f)) { PanoNav.stop() }
+            }
+            NavButton("Başka yer", c.chip, c.text, onClick = onSearch)
+            NavButton("Haritalar'da aç", c.chip, c.text) {
+                val d = s.destination
+                Launch.intent(
+                    context,
+                    android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("geo:${d.lat},${d.lon}?q=${d.lat},${d.lon}(${android.net.Uri.encode(d.name)})")),
+                )
+            }
+        }
+        if (s.phase == NavPhase.Preview) {
+            Text(
+                "Vazgeç", color = c.secondary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(12.dp)).clickable { PanoNav.stop() }.padding(horizontal = 12.dp, vertical = 16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun NavButton(text: String, bg: Color, fg: Color, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        modifier.pressScale().height(72.dp).clip(RoundedCornerShape(36.dp)).background(if (enabled) bg else bg.copy(alpha = 0.35f))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 26.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = fg, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 

@@ -55,10 +55,24 @@ import app.pano.launcher.settings.LocalStyle
 import app.pano.launcher.ui.theme.linkColor
 import app.pano.launcher.ui.theme.Accent
 import app.pano.launcher.ui.theme.LocalPano
+import androidx.compose.runtime.collectAsState
+import app.pano.launcher.navigation.NavPhase
+import app.pano.launcher.navigation.PanoNav
+import app.pano.launcher.navigation.Route
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.LineString
+import org.maplibre.geojson.Point
+import org.maplibre.android.location.LocationComponent
 import org.maplibre.android.location.LocationComponentActivationOptions
+import org.maplibre.android.location.OnLocationCameraTransitionListener
 import org.maplibre.android.location.modes.CameraMode
 import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.maps.MapLibreMap
@@ -155,6 +169,8 @@ class MapHolder internal constructor(val view: MapView) {
     internal var styleUrl: String? = null
     internal var locationRequested = false
     internal var locationOn = false
+    /** Kameranın en son hangi navigasyon aşamasına göre ayarlandığı (aynı aşamada tekrar ayarlanmasın). */
+    internal var cameraPhase: String? = null
 }
 
 private val LocalMapHolder = staticCompositionLocalOf<MapHolder?> { null }
@@ -237,7 +253,22 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
                     holder.locationOn = true
                     locationMap = map
                 }
+                // Stil değişince katmanlar silinir; rota varsa yeniden çiz.
+                drawRoute(style, PanoNav.state.value?.route)
+                holder.cameraPhase = null
             }
+        }
+    }
+
+    // Pano navigasyonu: rotayı çiz, önizlemede rotanın tamamını göster, yönlendirmede aracı izle.
+    val nav by PanoNav.state.collectAsState()
+    val route = nav?.route
+    val phase = nav?.phase
+    LaunchedEffect(route, phase, locationMap) {
+        mapView.getMapAsync { map ->
+            val style = map.style?.takeIf { it.isFullyLoaded } ?: return@getMapAsync
+            drawRoute(style, route)
+            applyNavCamera(holder, map, mapView, route, phase, bottomInset)
         }
     }
 
@@ -254,6 +285,93 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
 
     // Önceki karttan kalan üst görünümden ayırıp buraya tak.
     AndroidView(factory = { mapView.also { (it.parent as? ViewGroup)?.removeView(it) } }, modifier = modifier)
+}
+
+private const val ROUTE_SOURCE = "pano-route"
+private const val ROUTE_CASING = "pano-route-casing"
+private const val ROUTE_LINE = "pano-route-line"
+/** MapLibre konum katmanının en alttaki katmanı; rota onun altına çizilir ki araç oku üstte kalsın. */
+private const val LOCATION_BOTTOM_LAYER = "mapbox-location-shadow-layer"
+
+/** Rotayı haritaya çizer; [route] null ise siler. */
+private fun drawRoute(style: Style, route: Route?) {
+    if (route == null) {
+        style.removeLayer(ROUTE_LINE)
+        style.removeLayer(ROUTE_CASING)
+        style.removeSource(ROUTE_SOURCE)
+        return
+    }
+    val line = LineString.fromLngLats(route.lats.indices.map { Point.fromLngLat(route.lons[it], route.lats[it]) })
+    val source = style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE)
+    if (source != null) {
+        source.setGeoJson(line)
+        return
+    }
+    style.addSource(GeoJsonSource(ROUTE_SOURCE, line))
+    val casing = LineLayer(ROUTE_CASING, ROUTE_SOURCE).withProperties(
+        PropertyFactory.lineColor("#0B3D91"),
+        PropertyFactory.lineWidth(12f),
+        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+    )
+    val top = LineLayer(ROUTE_LINE, ROUTE_SOURCE).withProperties(
+        PropertyFactory.lineColor("#2F8CFF"),
+        PropertyFactory.lineWidth(7f),
+        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+    )
+    if (style.getLayer(LOCATION_BOTTOM_LAYER) != null) {
+        style.addLayerBelow(casing, LOCATION_BOTTOM_LAYER)
+        style.addLayerAbove(top, ROUTE_CASING)
+    } else {
+        style.addLayer(casing)
+        style.addLayer(top)
+    }
+}
+
+/**
+ * Kamera: önizlemede rotanın tamamı, yönlendirmede araç arkadan ve yakından (gidiş yönüne dönük),
+ * navigasyon yokken her zamanki kuzey yukarı takip. Yalnızca aşama değişince ayarlanır.
+ */
+private fun applyNavCamera(holder: MapHolder, map: MapLibreMap, view: MapView, route: Route?, phase: NavPhase?, bottomInset: Float) {
+    val key = "${phase}-${route?.hashCode()}"
+    if (holder.cameraPhase == key) return
+    holder.cameraPhase = key
+    val location = if (holder.locationOn) map.locationComponent else null
+    val h = view.height
+    when {
+        phase == NavPhase.Preview && route != null -> {
+            location?.cameraMode = CameraMode.NONE
+            location?.renderMode = RenderMode.NORMAL
+            map.setPadding(0, 0, 0, (h * bottomInset).toInt())
+            val bounds = LatLngBounds.Builder().apply { route.lats.indices.forEach { include(LatLng(route.lats[it], route.lons[it])) } }.build()
+            val pad = (minOf(view.width, h) * 0.12f).toInt()
+            map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, pad, (h * 0.22f).toInt(), pad, pad + (h * bottomInset).toInt()), 600)
+        }
+        phase == NavPhase.Active && route != null -> {
+            // Araç ekranın alt üçte birinde, önü görünsün; üstte manevra kartı var.
+            map.setPadding(0, (h * 0.45f).toInt(), 0, (h * bottomInset).toInt())
+            location?.renderMode = RenderMode.GPS
+            location?.track(CameraMode.TRACKING_GPS, zoom = 16.5, tilt = 45.0)
+        }
+        else -> {
+            map.setPadding(0, 0, 0, (h * bottomInset).toInt())
+            location?.renderMode = RenderMode.NORMAL
+            location?.track(CameraMode.TRACKING, zoom = 13.0, tilt = 0.0)
+            if (location == null) map.easeCamera(CameraUpdateFactory.tiltTo(0.0))
+        }
+    }
+}
+
+/** Kamera modunu değiştirir; yakınlaştırma ve eğim geçiş bitince uygulanır (geçiş sırasında yok sayılıyor). */
+private fun LocationComponent.track(mode: Int, zoom: Double, tilt: Double) {
+    setCameraMode(mode, object : OnLocationCameraTransitionListener {
+        override fun onLocationCameraTransitionFinished(cameraMode: Int) {
+            zoomWhileTracking(zoom, 800)
+            tiltWhileTracking(tilt, 800)
+        }
+        override fun onLocationCameraTransitionCanceled(cameraMode: Int) {}
+    })
 }
 
 @SuppressLint("MissingPermission")
