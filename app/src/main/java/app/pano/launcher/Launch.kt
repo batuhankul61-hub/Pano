@@ -1,8 +1,10 @@
 package app.pano.launcher
 
+import android.app.Activity
 import android.app.ActivityOptions
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.Rect
 import android.net.Uri
@@ -34,9 +36,79 @@ object Launch {
         return ActivityOptions.makeClipRevealAnimation(anchor.view, b.left, b.top, b.width(), b.height()).toBundle()
     }
 
-    private fun start(context: Context, intent: Intent, failMessage: String, anchor: LaunchAnchor? = null) {
+    /**
+     * Tesla tarzı yan yana: true ise uygulamalar ekranın sağ yarısında açılır, Pano sol yarıda
+     * kalır (Android'in bölünmüş ekranı). CarPlay düzeni açıkken MainActivity true yapar.
+     */
+    @Volatile var sideBySide = false
+
+    private fun Context.findActivity(): Activity? {
+        var c: Context? = this
+        while (c is ContextWrapper) {
+            if (c is Activity) return c
+            c = c.baseContext
+        }
+        return null
+    }
+
+    /**
+     * Uygulamayı sağ yarıda açacak seçenekler. Pano zaten bölünmüş ekrandaysa standart "yanına aç"
+     * bayrağı yeter (sağdaki uygulamanın yerine geçer). Değilse uygulama, bölünmüş ekranın birincil
+     * tarafı olarak sağa yerleştirilir; Pano kendiliğinden sol yarıya geçer. Bu iki ayar Android 10'da
+     * gizli API (ActivityOptions.setLaunchWindowingMode / setSplitScreenCreateMode); erişilemezse null.
+     */
+    private fun splitOptions(activity: Activity, intent: Intent): Bundle? {
+        if (activity.isInMultiWindowMode) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
+            return ActivityOptions.makeBasic().toBundle()
+        }
+        return runCatching {
+            val o = ActivityOptions.makeBasic()
+            val int = Int::class.javaPrimitiveType
+            // WINDOWING_MODE_SPLIT_SCREEN_PRIMARY = 3, SPLIT_SCREEN_CREATE_MODE_BOTTOM_OR_RIGHT = 1
+            ActivityOptions::class.java.getMethod("setLaunchWindowingMode", int).invoke(o, 3)
+            ActivityOptions::class.java.getMethod("setSplitScreenCreateMode", int).invoke(o, 1)
+            o.toBundle()
+        }.onFailure { Log.w("Launch", "bölünmüş ekran seçenekleri: $it") }.getOrNull()
+    }
+
+    /**
+     * BYD bölünmüş ekranda yeni uygulamayı hep sola koyuyor (yerleşim isteğini yok sayıyor).
+     * Bölünme oturunca Pano sağdaysa, BYD'nin "iki parmakla yer değiştir" yayınıyla taraflar
+     * değiştirilir (SystemUI'deki Divider bu yayını dinliyor; ayırıcıdaki ⇄ düğmesiyle aynı iş).
+     */
+    private fun keepPanoOnLeft(activity: Activity) {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        var tries = 0
+        fun check() {
+            tries++
+            if (activity.isFinishing) return
+            if (!activity.isInMultiWindowMode) {
+                if (tries < 6) handler.postDelayed(::check, 250)
+                return
+            }
+            val loc = IntArray(2)
+            activity.window.decorView.getLocationOnScreen(loc)
+            if (loc[0] > 0) {
+                Log.i("Launch", "Pano sağda kaldı (x=${loc[0]}), taraflar değiştiriliyor")
+                runCatching { activity.sendBroadcast(Intent(BYD_SPLIT_SWAP)) }
+            }
+        }
+        handler.postDelayed(::check, 400)
+    }
+
+    private const val BYD_SPLIT_SWAP = "byd.intent.action.DOUBLE_FINGER_SWAP"
+
+    private fun start(context: Context, intent: Intent, failMessage: String, anchor: LaunchAnchor? = null, side: Boolean = false) {
         try {
-            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), options(anchor))
+            val activity = if (side && sideBySide) context.findActivity() else null
+            val opts = if (activity != null) splitOptions(activity, intent) ?: options(anchor) else options(anchor)
+            val wasSplit = activity?.isInMultiWindowMode == true
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts)
+            if (activity != null) {
+                Log.i("Launch", "yan yana açıldı: ${intent.component ?: intent.`package` ?: intent.action}")
+                if (!wasSplit) keepPanoOnLeft(activity)
+            }
             lastLaunchAt = SystemClock.uptimeMillis()
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(context, failMessage, Toast.LENGTH_SHORT).show()
@@ -54,10 +126,11 @@ object Launch {
                 .addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED),
             "Uygulama açılamadı",
             anchor,
+            side = true,
         )
 
     fun maps(context: Context, anchor: LaunchAnchor? = null) =
-        start(context, Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=")), "Navigasyon uygulaması bulunamadı", anchor)
+        start(context, Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=")), "Navigasyon uygulaması bulunamadı", anchor, side = true)
 
     /**
      * Medya oturumunu açan paketin kendi simgesi olmayabilir: BYD'de Spotify çalar ama araç ekranında
@@ -83,14 +156,14 @@ object Launch {
         val launch = launchable(context, listOf(activePackage, MEDIA_FRONTENDS[activePackage]))
             ?: Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC).takeIf { resolves(context, it) }
             ?: launchable(context, CAR_MUSIC_APPS)
-        if (launch != null) start(context, launch, "Müzik uygulaması açılamadı", anchor)
+        if (launch != null) start(context, launch, "Müzik uygulaması açılamadı", anchor, side = true)
         else Toast.makeText(context, "Müzik uygulaması bulunamadı", Toast.LENGTH_SHORT).show()
     }
 
     fun phone(context: Context, anchor: LaunchAnchor? = null) {
         val launch = Intent(Intent.ACTION_DIAL).takeIf { resolves(context, it) }
             ?: launchable(context, CAR_PHONE_APPS)
-        if (launch != null) start(context, launch, "Telefon uygulaması açılamadı", anchor)
+        if (launch != null) start(context, launch, "Telefon uygulaması açılamadı", anchor, side = true)
         else Toast.makeText(context, "Telefon uygulaması bulunamadı", Toast.LENGTH_SHORT).show()
     }
 

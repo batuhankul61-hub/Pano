@@ -50,9 +50,9 @@ import kotlin.math.min
  * o tuvali ekrana sığacak şekilde ölçekler; böylece ölçüler tasarımdakiyle birebir kalır.
  */
 @Composable
-fun DesignCanvas(content: @Composable () -> Unit) {
+fun DesignCanvas(designWidth: Float = 1600f, designHeight: Float = 900f, content: @Composable () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val scale = min(maxWidth.value / 1600f, maxHeight.value / 900f)
+        val scale = min(maxWidth.value / designWidth, maxHeight.value / designHeight)
         val density = LocalDensity.current
         CompositionLocalProvider(LocalDensity provides Density(density.density * scale, 1f)) {
             content()

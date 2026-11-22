@@ -115,7 +115,10 @@ fun PanoApp(screen: Screen, onNavigate: (Screen) -> Unit) {
     // Harita tüm ekranlar ve iki düzen arasında paylaşılıyor; geçişlerde yeniden yüklenmiyor.
     app.pano.launcher.ui.ProvideMapHolder {
         Box(Modifier.fillMaxSize()) {
-            if (LocalStyle.current.layout == LayoutStyle.CarPlay) {
+            val carPlay = LocalStyle.current.layout == LayoutStyle.CarPlay
+            // CarPlay düzeninde uygulamalar sağ yarıda açılır (Tesla gibi); klasik düzende tam ekran.
+            Launch.sideBySide = carPlay
+            if (carPlay) {
                 CarPlayApp(screen, climate, onNavigate)
             } else {
                 ClassicApp(screen, climate, onNavigate)

@@ -288,6 +288,12 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
             }
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
+      BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Bölünmüş ekranda (sağda başka uygulama) Pano dar kalır: sade düzen.
+        if (maxWidth < maxHeight * 1.3f) {
+            CompactCarPlay(screen, climate, onNavigate)
+            return@BoxWithConstraints
+        }
         DesignCanvas {
             // Duvar kağıdı sabit kalır; başka uygulamadan dönünce yalnızca içerik yakınlaşarak gelir.
             Row(Modifier.fillMaxSize().returnZoom().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -341,6 +347,40 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                         Modifier.align(Alignment.BottomCenter).padding(bottom = 130.dp).width(1280.dp)
                             .pointerInput(Unit) { detectTapGestures { } },
                     )
+                }
+            }
+        }
+      }
+    }
+}
+
+/**
+ * Bölünmüş ekranda Pano'nun sol yarısı: sol çubuk, harita (navigasyon kartıyla) ve alt şerit.
+ * Sağ yarıda açılan uygulama (Spotify vb.) çalışırken ikisi aynı anda kullanılır.
+ * "Tam ekran" bölünmüş ekrandan çıkar (Erişilebilirlik'te Pano hizmeti açık olmalı).
+ */
+@Composable
+private fun CompactCarPlay(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit) {
+    val c = glass()
+    val context = LocalContext.current
+    DesignCanvas(designWidth = 760f, designHeight = 900f) {
+        Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Rail(screen, onNavigate, Modifier.width(108.dp).fillMaxHeight())
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                MapWidget(Modifier.weight(1f).fillMaxWidth())
+                Row(Modifier.fillMaxWidth().height(92.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ClimateStrip(climate, onNavigate, Modifier.weight(1f).fillMaxHeight())
+                    Box(
+                        Modifier.pressScale().size(92.dp).glass(c, RoundedCornerShape(30.dp))
+                            .clickable(role = Role.Button) { app.pano.launcher.system.SystemActions.splitScreen(context) }
+                            .semantics { contentDescription = "Tam ekran" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(PanoIcons.Split, contentDescription = null, tint = c.text, modifier = Modifier.size(26.dp))
+                            Text("Tam ekran", color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                        }
+                    }
                 }
             }
         }
