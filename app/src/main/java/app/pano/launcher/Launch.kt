@@ -63,7 +63,11 @@ object Launch {
                     intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
                     ActivityOptions.makeBasic().toBundle()
                 }
-                else -> app.pano.launcher.system.SidePanel.options()?.also { panel = true } ?: options(anchor)
+                else -> {
+                    val pkg = intent.component?.packageName ?: intent.`package`
+                        ?: context.packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName
+                    app.pano.launcher.system.SidePanel.options(pkg)?.also { panel = true } ?: options(anchor)
+                }
             }
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts)
             if (panel) app.pano.launcher.system.SidePanel.opened(intent)

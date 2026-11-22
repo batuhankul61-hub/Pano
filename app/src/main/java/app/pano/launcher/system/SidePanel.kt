@@ -42,11 +42,34 @@ object SidePanel {
 
     val isOpen: Boolean get() = current != null
 
+    /**
+     * Android, yeni pencerenin bir köşesi var olan (gizli de olsa) bir pencerenin köşesine 4 px'ten
+     * yakınsa onu yana kaydırıyor ("çakışmayı önleme"); paneldeki her yeni uygulama 80 px sola
+     * kayıyordu. Bu yüzden her uygulamaya birkaç piksel farklı bir yuva verilir (en fazla 10 px):
+     * hiçbir köşe çakışmaz, pencere panelde kalır. Yuvalar son kullanılan uygulamalara dağıtılır.
+     */
+    private val SLOTS = listOf(0 to 0, 5 to 0, 0 to 5, 5 to 5, 10 to 0, 0 to 10, 10 to 5, 5 to 10, 10 to 10)
+    private val slotOf = LinkedHashMap<String, Int>()
+
+    private fun slotFor(pkg: String?): Pair<Int, Int> {
+        if (pkg == null) return SLOTS[0]
+        slotOf[pkg]?.let { s -> slotOf.remove(pkg); slotOf[pkg] = s; return SLOTS[s] }
+        // En eski kullanılanın yuvası boşa çıkar; boş yuva yoksa onu devral.
+        val used = slotOf.values.toSet()
+        val free = SLOTS.indices.firstOrNull { it !in used } ?: slotOf.entries.first().let { e -> slotOf.remove(e.key); e.value }
+        slotOf[pkg] = free
+        return SLOTS[free]
+    }
+
     /** Uygulamayı sağ panelde açacak seçenekler; panel ölçülmediyse ya da gizli API yoksa null. */
-    fun options(): Bundle? {
+    fun options(pkg: String? = current?.let { it.component?.packageName ?: it.`package` }): Bundle? {
         val r = bounds ?: return null
+        val (dx, dy) = slotFor(pkg)
         return runCatching {
-            val o = ActivityOptions.makeBasic().setLaunchBounds(Rect(r))
+            // Pencere panelden 10 px küçük, yuvaya göre yalnızca yeri değişir: iki yuva ya hem sol hem
+            // sağ kenarda ya da hem üst hem alt kenarda ≥5 px ayrışır, hiçbir köşe çakışmaz.
+            val o = ActivityOptions.makeBasic()
+                .setLaunchBounds(Rect(r.left + dx, r.top + dy, r.right - (10 - dx), r.bottom - (10 - dy)))
             ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
                 .invoke(o, WINDOWING_MODE_FREEFORM)
             o.toBundle()
