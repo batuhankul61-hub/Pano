@@ -95,6 +95,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                         "Görünümü değiştirmek için stil seçeneklerini açar",
                         style.developerMode,
                     ) { on -> Settings.update { it.copy(developerMode = on) } }
+                    Divider()
+                    SwitchRowSetting(
+                        "Sürüşte kısıtla",
+                        "Araç hareket ederken kartları gizler, Uygulamalar/Ayarlar ve videoyu kilitler",
+                        style.drivingLock,
+                    ) { on -> Settings.update { it.copy(drivingLock = on) } }
                 }
 
                 Text(

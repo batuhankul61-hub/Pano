@@ -86,6 +86,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
 import app.pano.launcher.settings.DockStore
+import app.pano.launcher.settings.LocalStyle
 import app.pano.launcher.settings.DockControl
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.layout.widthIn
@@ -186,6 +187,17 @@ private fun Modifier.glass(c: GlassColors, shape: Shape = RoundedCornerShape(32.
         .background(c.fill)
         .background(Brush.verticalGradient(listOf(c.sheen, Color.Transparent)))
         .border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), shape)
+
+/**
+ * Sürüş kısıtlaması uygulanacak mı: araç hareket ediyor **ve** ayarlarda "Sürüşte kısıtla"
+ * açık. Kapalıyken (geliştirme varsayılanı) sürüşte hiçbir kart gizlenmez, ekran kilitlenmez.
+ * "SÜRÜŞ" durum etiketi bundan bağımsız olarak gerçek durumu gösterir.
+ */
+@Composable
+private fun drivingLocked(): Boolean {
+    val driving by VehicleHub.isDriving.collectAsState()
+    return driving && LocalStyle.current.drivingLock
+}
 
 // ───────────────────────── Animasyon ─────────────────────────
 
@@ -336,7 +348,7 @@ private fun Rail(current: Screen, onNavigate: (Screen) -> Unit, modifier: Modifi
     val now by rememberClock()
     val playing by MediaHub.state.collectAsState()
     val vehicle by VehicleHub.state.collectAsState()
-    val driving by VehicleHub.isDriving.collectAsState()
+    val driving = drivingLocked()
     fun toggle(target: Screen) = onNavigate(if (current == target) Screen.Home else target)
 
     Column(
@@ -451,7 +463,7 @@ private fun RailApp(icon: ImageVector, label: String, tint: List<Color>, dimmed:
 
 @Composable
 private fun Dashboard(modifier: Modifier) {
-    val driving by VehicleHub.isDriving.collectAsState()
+    val driving = drivingLocked()
     // 1 = park düzeni, 0 = sürüş düzeni. Ağırlık ve boşluklar birlikte küçülür; sıçrama olmaz.
     val parked by animateFloatAsState(if (driving) 0f else 1f, tween(MotionMs * 2), label = "sürüş-düzeni")
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -522,7 +534,7 @@ private fun RightScreenHost(screen: Screen, onNavigate: (Screen) -> Unit, modifi
     // 1 = tamamen dışarıda (sağda), 0 = açık.
     val hidden = remember { Animatable(1f) }
     val scope = rememberCoroutineScope()
-    val driving by VehicleHub.isDriving.collectAsState()
+    val driving = drivingLocked()
     var web by remember { mutableStateOf<android.webkit.WebView?>(null) }
 
     LaunchedEffect(target != null) {
@@ -618,7 +630,7 @@ private fun RightScreenHost(screen: Screen, onNavigate: (Screen) -> Unit, modifi
  */
 @Composable
 private fun DrivingGate(title: String, onHome: () -> Unit, content: @Composable () -> Unit) {
-    val driving by VehicleHub.isDriving.collectAsState()
+    val driving = drivingLocked()
     AnimatedContent(
         targetState = driving,
         transitionSpec = {
@@ -935,7 +947,7 @@ private fun VehicleWidget(modifier: Modifier) {
 
         // Araç düğmeleri sürüşte gerekmez; kapanınca araç çizimi büyür.
         AnimatedVisibility(
-            visible = !driving,
+            visible = !drivingLocked(),
             enter = fadeIn(tween(MotionMs)) + expandVertically(tween(MotionMs * 2)),
             exit = fadeOut(tween(MotionMs / 2)) + shrinkVertically(tween(MotionMs * 2)),
         ) {
@@ -1128,7 +1140,7 @@ private fun NowPlayingWidget(modifier: Modifier) {
     val context = LocalContext.current
     val playing by MediaHub.state.collectAsState()
     val now by rememberClock()
-    val driving by VehicleHub.isDriving.collectAsState()
+    val driving = drivingLocked()
     val p = playing
 
     // Kartın boş yerine dokununca sağ ekranda büyük "Şimdi çalıyor" açılır; kapak ve düğmeler kendi işini yapar.
