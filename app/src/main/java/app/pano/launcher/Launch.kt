@@ -66,6 +66,13 @@ object Launch {
                 else -> {
                     val pkg = intent.component?.packageName ?: intent.`package`
                         ?: context.packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName
+                    // Pano önce çubuklara yer açar (panel kayar), panelin yeni yeri ölçülünce açılır.
+                    if (app.pano.launcher.system.SidePanel.prepare()) {
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            start(context, intent, failMessage, anchor, side)
+                        }, 150)
+                        return
+                    }
                     app.pano.launcher.system.SidePanel.options(pkg)?.also { panel = true } ?: options(anchor)
                 }
             }

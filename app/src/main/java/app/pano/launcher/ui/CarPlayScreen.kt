@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBarsIgnoringVisibility
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -286,9 +287,16 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                     blobs.forEach { drawCircle(it.brush, it.radius, it.center) }
                 }
             }
-            // Çubuklar gizliyken onlara yer ayrılmaz: kenardan çekilince üstte görünürler, düzen ve sağ
-            // panelin yeri kaymaz (paneldeki uygulama penceresi yerinde kalır).
-            .then(if (LocalStyle.current.hideSystemBar) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing)),
+            // Çubuklar gizliyken onlara yer ayrılmaz. Sağ panelde uygulama açıkken Android çubukları
+            // zorla gösterir (freeform); o zaman Pano tam onların boyu kadar boşluk bırakır, çubuklar
+            // saati ve alt şeridi örtmez. Panelin yeri ölçülmeden önce bu boşluk ayarlanır.
+            .then(
+                when {
+                    !LocalStyle.current.hideSystemBar -> Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
+                    app.pano.launcher.system.SidePanel.openState.value -> Modifier.windowInsetsPadding(systemBarsAlways())
+                    else -> Modifier
+                },
+            ),
     ) {
       BoxWithConstraints(Modifier.fillMaxSize()) {
         // Bölünmüş ekranda (sağda başka uygulama) Pano dar kalır: sade düzen.
@@ -2028,3 +2036,8 @@ private fun GlassPill(text: String, on: Boolean, onClick: () -> Unit) {
         Text(text, color = if (on) Color.White else c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
     }
 }
+
+/** Sistem çubuklarının boyu, şu an gizli olsalar bile (sağ panel açılınca görünecekler). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun systemBarsAlways(): WindowInsets = WindowInsets.systemBarsIgnoringVisibility

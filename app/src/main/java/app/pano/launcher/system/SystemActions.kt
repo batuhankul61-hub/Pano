@@ -31,8 +31,36 @@ object SystemActions {
             .onFailure { Log.w(TAG, "döndürme: $it") }
     }
 
+    /**
+     * BYD'nin ayarlarında Erişilebilirlik menüsü yok. Pano'ya güvenli ayar izni verildiyse
+     * (bkz. [SystemBars]) hizmet buradan açılır: kullanıcı düğmeye bastığı anda, yalnızca
+     * Pano'nun kendi hizmeti eklenir; listedeki diğer hizmetlere dokunulmaz.
+     */
+    private fun enableOwnService(context: Context): Boolean {
+        if (!SystemBars.canApplyGlobal(context)) return false
+        val me = "${context.packageName}/${PanoAccessibility::class.java.name}"
+        return runCatching {
+            val cr = context.contentResolver
+            val list = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+            val items = list.split(':').filter { it.isNotBlank() }
+            if (me !in items) Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, (items + me).joinToString(":"))
+            Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+            Log.i(TAG, "Pano erişilebilirlik hizmeti açıldı")
+            true
+        }.onFailure { Log.w(TAG, "hizmet açılamadı: $it") }.getOrDefault(false)
+    }
+
     private fun global(context: Context, action: Int) {
         val service = PanoAccessibility.instance
+        if (service == null && enableOwnService(context)) {
+            // Hizmetin bağlanması bir an sürer; sonra istenen eylem yapılır.
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                val s = PanoAccessibility.instance
+                if (s != null) s.performGlobalAction(action)
+                else Toast.makeText(context, "Pano hizmeti açılıyor, tekrar dene", Toast.LENGTH_SHORT).show()
+            }, 800)
+            return
+        }
         if (service == null) {
             Toast.makeText(
                 context, "Bu düğme için Ayarlar > Erişilebilirlik'te \"Pano\" hizmetini aç", Toast.LENGTH_LONG,

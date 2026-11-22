@@ -92,6 +92,16 @@ object SidePanel {
     /** Compose için: sağ panelde başka bir uygulama var mı (Pano o alanı boş bırakır). */
     val openState = androidx.compose.runtime.mutableStateOf(false)
 
+    /**
+     * Panel ilk kez açılacak: Pano çubuklara yer açsın diye önce durumu işaretler. true dönerse
+     * çağıran, Pano yeniden yerleşip panelin yeni yeri ölçülünce (kısa bir beklemeyle) açmalı.
+     */
+    fun prepare(): Boolean {
+        if (openState.value) return false
+        openState.value = true
+        return true
+    }
+
     /** [Launch] uygulamayı panelde açtıktan sonra çağırır. */
     fun opened(activity: Activity, intent: Intent) {
         current = Intent(intent)
