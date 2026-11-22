@@ -42,7 +42,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.systemBarsIgnoringVisibility
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -293,7 +292,7 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
             .then(
                 when {
                     !LocalStyle.current.hideSystemBar -> Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
-                    app.pano.launcher.system.SidePanel.openState.value -> Modifier.windowInsetsPadding(systemBarsAlways())
+                    app.pano.launcher.system.SidePanel.openState.value -> Modifier.systemBarsSpace()
                     else -> Modifier
                 },
             ),
@@ -2037,7 +2036,19 @@ private fun GlassPill(text: String, on: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** Sistem çubuklarının boyu, şu an gizli olsalar bile (sağ panel açılınca görünecekler). */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+/**
+ * Sistem çubuklarının boyu kadar üst/alt boşluk (sağ panel açıkken görünecekler). Pencere
+ * insets'i bu durumda 0 gelebildiği için sistemin sabit ölçüleri kullanılır.
+ */
 @Composable
-private fun systemBarsAlways(): WindowInsets = WindowInsets.systemBarsIgnoringVisibility
+private fun Modifier.systemBarsSpace(): Modifier {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    fun dimen(name: String): Int {
+        val id = context.resources.getIdentifier(name, "dimen", "android")
+        return if (id != 0) context.resources.getDimensionPixelSize(id) else 0
+    }
+    val top = with(density) { dimen("status_bar_height").toDp() }
+    val bottom = with(density) { dimen("navigation_bar_height").toDp() }
+    return this.padding(top = top, bottom = bottom)
+}

@@ -49,19 +49,14 @@ object SidePanel {
      * hiçbir köşe çakışmaz, pencere panelde kalır. Yuvalar son kullanılan uygulamalara dağıtılır.
      */
     private val SLOTS = listOf(0 to 0, 5 to 0, 0 to 5, 5 to 5, 10 to 0, 0 to 10, 10 to 5, 5 to 10, 10 to 10)
-    private val slotOf = LinkedHashMap<String, Int>()
 
     private fun slotFor(pkg: String?): Pair<Int, Int> {
         if (pkg == null) return SLOTS[0]
-        slotOf[pkg]?.let { s -> slotOf.remove(pkg); slotOf[pkg] = s; return SLOTS[s] }
-        // En eski kullanılanın yuvası boşa çıkar; boş yuva yoksa onu devral.
-        val used = slotOf.values.toSet()
-        val free = SLOTS.indices.firstOrNull { it !in used } ?: slotOf.entries.first().let { e -> slotOf.remove(e.key); e.value }
-        slotOf[pkg] = free
-        return SLOTS[free]
+        // Yuva paket adından: güncellemeden / yeniden başlatmadan sonra da aynı kalır; önceki
+        // oturumdan kalan pencerelerle çakışmaz (yalnızca adı aynı yuvaya düşen iki uygulama çakışır).
+        return SLOTS[Math.floorMod(pkg.hashCode(), SLOTS.size)]
     }
 
-    /** Uygulamayı sağ panelde açacak seçenekler; panel ölçülmediyse ya da gizli API yoksa null. */
     /**
      * Android freeform pencereyi durum çubuğunun altına koymaz (çubuk görünürken aşağı iter).
      * Çubuklar her yerde gizli değilse panel penceresi durum çubuğunun altından başlar; böylece
