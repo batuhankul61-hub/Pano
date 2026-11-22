@@ -1749,6 +1749,10 @@ private fun DockItemView(control: DockControl, climate: ClimateState, onNavigate
         DockControl.Music -> icon(PanoIcons.Music, "Müzik") { Launch.music(context, playing?.packageName) }
         DockControl.Phone -> icon(PanoIcons.Phone, "Telefon") { Launch.phone(context) }
         DockControl.Voice -> icon(PanoIcons.Mic, "Sesli asistan") { Launch.voiceAssistant(context) }
+        DockControl.Back -> icon(PanoIcons.Back, "Geri") { app.pano.launcher.system.SystemActions.back(context) }
+        DockControl.Split -> icon(PanoIcons.Split, "Yarım ekran") { app.pano.launcher.system.SystemActions.splitScreen(context) }
+        DockControl.Recents -> icon(PanoIcons.Recents, "Son uygulamalar") { app.pano.launcher.system.SystemActions.recents(context) }
+        DockControl.Rotate -> icon(PanoIcons.Rotate, "Ekranı döndür") { app.pano.launcher.system.SystemActions.rotate(context) }
         DockControl.Apps -> icon(PanoIcons.Apps, "Uygulamalar") { onNavigate(Screen.Apps) }
         DockControl.CarSettings -> icon(PanoIcons.Car, "Araç ayarları") { Launch.carSettings(context) }
         DockControl.PanoSettings -> icon(PanoIcons.Sliders, "Pano ayarları") { onNavigate(Screen.Settings) }
@@ -1860,6 +1864,10 @@ private fun dockIcon(control: DockControl): ImageVector = when (control) {
     DockControl.Music -> PanoIcons.Music
     DockControl.Phone -> PanoIcons.Phone
     DockControl.Voice -> PanoIcons.Mic
+    DockControl.Back -> PanoIcons.Back
+    DockControl.Split -> PanoIcons.Split
+    DockControl.Recents -> PanoIcons.Recents
+    DockControl.Rotate -> PanoIcons.Rotate
     DockControl.Apps -> PanoIcons.Apps
     DockControl.CarSettings -> PanoIcons.Car
     DockControl.PanoSettings -> PanoIcons.Sliders

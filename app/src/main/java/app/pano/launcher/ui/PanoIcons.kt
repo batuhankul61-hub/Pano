@@ -72,6 +72,12 @@ object PanoIcons {
     val Pin = line("pin", "M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z" + circle(12f, 10f, 2.3f))
     val Clock = line("clock", circle(12f, 12f, 8.5f) + "M12 7.5V12l3 2")
 
+    // Aracın alt çubuğundaki sistem düğmeleri.
+    val Back = line("back", "M9 7.5L5 11.5l4 4M5 11.5h10a4.5 4.5 0 0 1 0 9h-3")
+    val Split = line("split", "M4.5 5.5h6v13h-6zM13.5 5.5h6v13h-6z")
+    val Recents = line("recents", "M6.5 5h11a1.5 1.5 0 0 1 1.5 1.5v11a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 17.5v-11A1.5 1.5 0 0 1 6.5 5z")
+    val Rotate = line("rotate", "M9 3.5h7a1.5 1.5 0 0 1 1.5 1.5v9M15 20.5H8A1.5 1.5 0 0 1 6.5 19v-9M3.5 13l3-3 3 3M20.5 11l-3 3-3-3")
+
     /** Mikrofon: sesli asistan. */
     val Mic = line("mic", "M9 6.5a3 3 0 0 1 6 0V12a3 3 0 0 1-6 0zM5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3")
 
