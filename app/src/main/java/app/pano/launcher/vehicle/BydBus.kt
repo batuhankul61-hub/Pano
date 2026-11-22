@@ -279,6 +279,44 @@ internal object BydSignals {
     private val CONSUMPTION_RANGE = 1.0..60.0
     @Volatile private var loggedConsumption = false
 
+    /**
+     * Kapı, bagaj, kaput, cam ve sunroof durumu. `BYDAutoBodyworkDevice.getDoorState` /
+     * `getWindowOpenPercent` aynı kimlikleri okuyor: kapılarda `BODYWORK_STATE_OPEN` = 1,
+     * `BODYWORK_STATE_CLOSED` = 0 (255 = tanımsız); camlarda 0–100 açıklık yüzdesi.
+     * Hiçbiri okunamazsa null.
+     */
+    fun openings(): Openings? {
+        fun door(field: String) = when (BydBus.readInt("Bodywork", field)) {
+            1 -> true
+            0 -> false
+            else -> null
+        }
+        fun percent(field: String) = BydBus.readInt("Bodywork", field)?.takeIf { it in 0..100 }
+        val o = Openings(
+            doorFrontLeft = door("BODYWORK_LEFT_HAND_FRONT_DOOR"),
+            doorFrontRight = door("BODYWORK_RIGHT_HAND_FRONT_DOOR"),
+            doorRearLeft = door("BODYWORK_LEFT_HAND_REAR_DOOR"),
+            doorRearRight = door("BODYWORK_RIGHT_HAND_REAR_DOOR"),
+            trunk = door("BODYWORK_LUGGAGE_DOOR"),
+            hood = door("BODYWORK_HOOD"),
+            windowFrontLeft = percent("BODYWORK_WINDOW_LEFT_FRONT_PERCENT"),
+            windowFrontRight = percent("BODYWORK_WINDOW_RIGHT_FRONT_PERCENT"),
+            windowRearLeft = percent("BODYWORK_WINDOW_LEFT_REAR_PERCENT"),
+            windowRearRight = percent("BODYWORK_WINDOW_RIGHT_REAR_PERCENT"),
+            sunroof = percent("BODYWORK_MOON_ROOF_OPEN_PERCENT"),
+        )
+        if (!loggedOpenings) {
+            // Ölçek araçta henüz doğrulanmadı; ilk okumayı ve cam durum sinyallerini kayda yaz.
+            loggedOpenings = true
+            val states = listOf("LEFT_FRONT", "RIGHT_FRONT", "LEFT_REAR", "RIGHT_REAR")
+                .map { BydBus.readInt("Bodywork", "BODYWORK_${it}_WINDOW") }
+            Log.i("BydBus", "gövde ham: $o cam durumları=$states")
+        }
+        return o.takeUnless { it.isEmpty }
+    }
+
+    @Volatile private var loggedOpenings = false
+
     fun tyresKpa(): TyrePressures? {
         fun corner(c: String) = BydBus.readInt("Instrument", "INSTRUMENT_2IN1_${c}_TYRE_PRESSURE")
             ?.takeIf { it > 0 }?.let { Math.round(it * PSI_TENTHS_TO_KPA) }

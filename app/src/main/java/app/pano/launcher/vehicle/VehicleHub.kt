@@ -36,6 +36,50 @@ data class TyrePressures(val frontLeft: Int?, val frontRight: Int?, val rearLeft
  */
 data class Consumption(val kwh100: Float, val recentWindow: Boolean)
 
+/**
+ * Gövde açıklıkları (kapılar, bagaj, kaput, camlar, sunroof). Her alan null = bilinmiyor
+ * (araçta yok ya da okunamadı). Kapılarda true = açık; camlarda değer açıklık yüzdesidir (0 = kapalı).
+ */
+data class Openings(
+    val doorFrontLeft: Boolean? = null,
+    val doorFrontRight: Boolean? = null,
+    val doorRearLeft: Boolean? = null,
+    val doorRearRight: Boolean? = null,
+    val trunk: Boolean? = null,
+    val hood: Boolean? = null,
+    val windowFrontLeft: Int? = null,
+    val windowFrontRight: Int? = null,
+    val windowRearLeft: Int? = null,
+    val windowRearRight: Int? = null,
+    val sunroof: Int? = null,
+) {
+    /** Açık olan her şey, önem sırasıyla (kapı/bagaj/kaput önce, camlar sonra). */
+    val open: List<Opening>
+        get() = buildList {
+            if (doorFrontLeft == true) add(Opening("Sol ön kapı", Opening.Kind.Door))
+            if (doorFrontRight == true) add(Opening("Sağ ön kapı", Opening.Kind.Door))
+            if (doorRearLeft == true) add(Opening("Sol arka kapı", Opening.Kind.Door))
+            if (doorRearRight == true) add(Opening("Sağ arka kapı", Opening.Kind.Door))
+            if (trunk == true) add(Opening("Bagaj", Opening.Kind.Trunk))
+            if (hood == true) add(Opening("Kaput", Opening.Kind.Hood))
+            if ((windowFrontLeft ?: 0) > 0) add(Opening("Sol ön cam", Opening.Kind.Window))
+            if ((windowFrontRight ?: 0) > 0) add(Opening("Sağ ön cam", Opening.Kind.Window))
+            if ((windowRearLeft ?: 0) > 0) add(Opening("Sol arka cam", Opening.Kind.Window))
+            if ((windowRearRight ?: 0) > 0) add(Opening("Sağ arka cam", Opening.Kind.Window))
+            if ((sunroof ?: 0) > 0) add(Opening("Sunroof", Opening.Kind.Window))
+        }
+
+    val isEmpty: Boolean
+        get() = listOf(doorFrontLeft, doorFrontRight, doorRearLeft, doorRearRight, trunk, hood).all { it == null } &&
+            listOf(windowFrontLeft, windowFrontRight, windowRearLeft, windowRearRight, sunroof).all { it == null }
+}
+
+/** Açık kalan tek bir gövde parçası. Kapı/bagaj/kaput cama göre daha önemli sayılır. */
+data class Opening(val label: String, val kind: Kind) {
+    enum class Kind { Door, Trunk, Hood, Window }
+    val isMajor: Boolean get() = kind != Kind.Window
+}
+
 /** Hız verisinin nereden geldiği. */
 enum class SpeedSource { Vehicle, Gps, None }
 
@@ -59,6 +103,8 @@ data class VehicleState(
     val tyresKpa: TyrePressures? = null,
     val locked: Boolean? = null,
     val consumption: Consumption? = null,
+    /** Kapı/bagaj/cam durumu; önizlemede her zaman null (uydurma "kapalı" gösterilmez). */
+    val openings: Openings? = null,
 ) {
     val consumptionKwh100: Float? get() = consumption?.kwh100
 }
@@ -162,6 +208,8 @@ object VehicleHub {
             insideTempC = slow.insideTempC,
             tyresKpa = slow.tyresKpa,
             consumption = slow.consumption,
+            // Kapı açılınca hemen görünsün diye her turda okunur.
+            openings = runCatching { BydSignals.openings() }.getOrNull(),
         )
     }
 

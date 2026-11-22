@@ -129,6 +129,7 @@ import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.ui.theme.linkColor
 import app.pano.launcher.vehicle.ClimateState
 import app.pano.launcher.vehicle.Gear
+import app.pano.launcher.vehicle.Opening
 import app.pano.launcher.vehicle.SpeedSource
 import app.pano.launcher.vehicle.VehicleHub
 import app.pano.launcher.vehicle.decimal
@@ -1312,7 +1313,11 @@ private fun VehicleWidget(modifier: Modifier) {
             }
         }
 
-        CarIllustration(Modifier.weight(1f).fillMaxWidth().padding(vertical = 10.dp), dark = c.dark, background = Color.Transparent)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            CarIllustration(Modifier.fillMaxSize().padding(vertical = 10.dp), dark = c.dark, background = Color.Transparent)
+            // Açık kapı/bagaj/cam yalnızca araçtan okununca gösterilir; önizlemede hiç yok.
+            OpeningsBadge(v.openings?.open.orEmpty(), parked = !driving, Modifier.align(Alignment.TopStart).padding(top = 10.dp))
+        }
 
         // Araç düğmeleri sürüşte gerekmez; kapanınca araç çizimi büyür.
         AnimatedVisibility(
@@ -1328,9 +1333,44 @@ private fun VehicleWidget(modifier: Modifier) {
                     when (locked) { true -> "Kilitli"; false -> "Açık"; null -> "Kilit" },
                     notYet,
                 )
-                GlassAction(PanoIcons.Trunk, "Bagaj", notYet)
+                GlassAction(PanoIcons.Trunk, if (v.openings?.trunk == true) "Bagaj açık" else "Bagaj", notYet)
                 GlassAction(PanoIcons.Bolt, "Şarj", notYet)
                 GlassAction(PanoIcons.Mirror, "Aynalar", notYet)
+            }
+        }
+    }
+}
+
+/**
+ * Açık kalan kapı/bagaj/kaput (kırmızı nokta) ve camlar (turuncu nokta). Park halindeyken kapı ya da
+ * bagaj açıksa üstte küçük bir uyarı satırı çıkar. Liste boşsa hiçbir şey çizilmez.
+ */
+@Composable
+private fun OpeningsBadge(open: List<Opening>, parked: Boolean, modifier: Modifier) {
+    val c = glass()
+    AnimatedVisibility(open.isNotEmpty(), modifier, enter = fadeIn(tween(MotionMs)), exit = fadeOut(tween(MotionMs))) {
+        Column(
+            Modifier.clip(RoundedCornerShape(16.dp)).background(c.chip).padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (parked && open.any { it.isMajor }) {
+                Text(
+                    "Araçtan inmeden önce kontrol edin", color = Accent.Red, fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp,
+                )
+            }
+            // Kart küçük; en önemli dördü gösterilir, kalanı sayı olarak.
+            open.take(4).forEach { item ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(9.dp).clip(CircleShape).background(if (item.isMajor) Accent.Red else Color(0xFFFF9F0A)))
+                    Text(
+                        "${item.label} açık", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+            if (open.size > 4) {
+                Text("+${open.size - 4} daha", color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
