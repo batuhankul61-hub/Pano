@@ -1306,6 +1306,19 @@ private fun VehicleWidget(modifier: Modifier) {
                         )
                     }
                 }
+                // Sürüş modu ve rejen yalnızca araçtan okununca görünür (önizlemede hiç yok).
+                val drive = listOfNotNull(v.driveMode?.label, v.regen?.let { "Rejen ${it.label}" })
+                if (drive.isNotEmpty()) {
+                    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        drive.forEach { label ->
+                            Text(
+                                label, color = c.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(c.chip)
+                                    .padding(horizontal = 9.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text("MENZİL", color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp)

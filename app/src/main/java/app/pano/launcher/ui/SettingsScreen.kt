@@ -24,6 +24,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -102,6 +104,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                         "Araç hareket ederken kartları gizler, Uygulamalar/Ayarlar ve videoyu kilitler",
                         style.drivingLock,
                     ) { on -> Settings.update { it.copy(drivingLock = on) } }
+                    Divider()
+                    SwitchRowSetting(
+                        "Araca komut gönder (deneysel)",
+                        "Sürüş modu ve rejen seviyesini değiştirir; yalnızca park halinde. Araçta henüz denenmedi",
+                        style.vehicleCommands,
+                    ) { on -> Settings.update { it.copy(vehicleCommands = on) } }
+                    if (style.vehicleCommands) DriveCommandRows()
                 }
 
                 Text(
@@ -222,6 +231,38 @@ private fun SwitchRowSetting(title: String, subtitle: String, checked: Boolean, 
             Text(subtitle, color = colors.secondary, fontSize = 15.sp, modifier = Modifier.padding(top = 3.dp))
         }
         PanoSwitch(checked, title, onChange)
+    }
+}
+
+/**
+ * Sürüş modu ve rejen seçimi. Seçili olan araçtan okunan değerdir (okunamıyorsa hiçbiri seçili değil);
+ * dokununca araca komut gider. BYD yoksa ya da araç hareket ediyorsa yalnızca sebep yazılır.
+ */
+@Composable
+private fun DriveCommandRows() {
+    val v by app.pano.launcher.vehicle.VehicleHub.state.collectAsState()
+    val driving by app.pano.launcher.vehicle.VehicleHub.isDriving.collectAsState()
+    Divider()
+    if (v.isPreview || driving) {
+        Text(
+            if (v.isPreview) "Araç verisi yok (önizleme); komut gönderilemez" else "Araç hareket halinde; komutlar park halinde açılır",
+            color = LocalPano.current.secondary, fontSize = 15.sp,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 18.dp),
+        )
+        return
+    }
+    val modes = app.pano.launcher.vehicle.DriveMode.entries
+    OptionRow("Sürüş modu") {
+        Segmented(modes.map { it.label }, modes.indexOf(v.driveMode), { i ->
+            app.pano.launcher.vehicle.BydDrive.setMode(modes[i])
+        })
+    }
+    Divider()
+    val levels = app.pano.launcher.vehicle.RegenLevel.entries
+    OptionRow("Rejen") {
+        Segmented(levels.map { it.label }, levels.indexOf(v.regen), { i ->
+            app.pano.launcher.vehicle.BydDrive.setRegen(levels[i])
+        })
     }
 }
 

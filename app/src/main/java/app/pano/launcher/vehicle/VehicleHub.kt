@@ -125,6 +125,9 @@ data class VehicleState(
     val openings: Openings? = null,
     /** Aracın TPMS uyarıları; sinyal yoksa null ve arayüz yalnızca değeri gösterir. */
     val tyreAlerts: TyreAlerts? = null,
+    /** Sürüş modu ve rejen seviyesi; okunamazsa null (önizlemede hep null). */
+    val driveMode: DriveMode? = null,
+    val regen: RegenLevel? = null,
 ) {
     val consumptionKwh100: Float? get() = consumption?.kwh100
 }
@@ -231,6 +234,8 @@ object VehicleHub {
             tyresKpa = slow.tyresKpa,
             consumption = slow.consumption,
             tyreAlerts = slow.tyreAlerts,
+            driveMode = runCatching { BydDrive.mode() }.getOrNull(),
+            regen = runCatching { BydDrive.regen() }.getOrNull(),
             // Kapı açılınca hemen görünsün diye her turda okunur.
             openings = runCatching { BydSignals.openings() }.getOrNull(),
         )

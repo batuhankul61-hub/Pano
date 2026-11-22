@@ -44,6 +44,11 @@ data class StyleSettings(
      * son kullanıcı sürümünde açık olması düşünülecek.
      */
     val drivingLock: Boolean = false,
+    /**
+     * Araca sürüş modu / rejen komutu gönderilebilsin mi. Henüz araçta denenmedi; varsayılan kapalı
+     * ve yalnızca park halinde çalışır.
+     */
+    val vehicleCommands: Boolean = false,
     val layout: LayoutStyle = LayoutStyle.Pano,
     val theme: ThemeMode = ThemeMode.Auto,
     val dock: DockStyle = DockStyle.Mono,
@@ -74,6 +79,7 @@ object Settings {
             showMessages = p.getBoolean("showMessages", d.showMessages),
             hideSystemBar = p.getBoolean("hideSystemBar", d.hideSystemBar),
             drivingLock = p.getBoolean("drivingLock", d.drivingLock),
+            vehicleCommands = p.getBoolean("vehicleCommands", d.vehicleCommands),
             layout = enumOr(p.getString("layout", null), d.layout),
             theme = enumOr(p.getString("theme", null), d.theme),
             dock = enumOr(p.getString("dock", null), d.dock),
@@ -91,6 +97,7 @@ object Settings {
             ?.putBoolean("showMessages", s.showMessages)
             ?.putBoolean("hideSystemBar", s.hideSystemBar)
             ?.putBoolean("drivingLock", s.drivingLock)
+            ?.putBoolean("vehicleCommands", s.vehicleCommands)
             ?.putString("layout", s.layout.name)
             ?.putString("theme", s.theme.name)
             ?.putString("dock", s.dock.name)
@@ -102,7 +109,7 @@ object Settings {
 
     /** Geliştirici modu ve mesaj ayarı korunur, sadece stiller sıfırlanır. */
     fun resetStyles() = update {
-        StyleSettings(developerMode = it.developerMode, showMessages = it.showMessages, hideSystemBar = it.hideSystemBar, drivingLock = it.drivingLock)
+        StyleSettings(developerMode = it.developerMode, showMessages = it.showMessages, hideSystemBar = it.hideSystemBar, drivingLock = it.drivingLock, vehicleCommands = it.vehicleCommands)
     }
 
     private inline fun <reified T : Enum<T>> enumOr(name: String?, fallback: T): T =
