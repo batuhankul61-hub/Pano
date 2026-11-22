@@ -31,18 +31,21 @@ object AppSheet {
         private set
 
     fun open(title: String, url: String) {
+        app.pano.launcher.system.SidePanel.close()
         music = false
         nav = false
         page = Page(title, url)
     }
 
     fun openMusic() {
+        app.pano.launcher.system.SidePanel.close()
         page = null
         nav = false
         music = true
     }
 
     fun openNav() {
+        app.pano.launcher.system.SidePanel.close()
         page = null
         music = false
         nav = true

@@ -37,8 +37,10 @@ object Launch {
     }
 
     /**
-     * Tesla tarzı yan yana: true ise uygulamalar ekranın sağ yarısında açılır, Pano sol yarıda
-     * kalır (Android'in bölünmüş ekranı). CarPlay düzeni açıkken MainActivity true yapar.
+     * Tesla tarzı sağ panel: true ise uygulamalar Pano'nun sağ panelinde pencere olarak açılır
+     * ([app.pano.launcher.system.SidePanel]); Pano tam ekran kalır. CarPlay düzeni açıkken
+     * MainActivity true yapar. Pano kullanıcı tarafından bölünmüş ekrana alınmışsa uygulama
+     * standart "yanına aç" ile diğer yarıda açılır.
      */
     @Volatile var sideBySide = false
 
@@ -51,64 +53,20 @@ object Launch {
         return null
     }
 
-    /**
-     * Uygulamayı sağ yarıda açacak seçenekler. Pano zaten bölünmüş ekrandaysa standart "yanına aç"
-     * bayrağı yeter (sağdaki uygulamanın yerine geçer). Değilse uygulama, bölünmüş ekranın birincil
-     * tarafı olarak sağa yerleştirilir; Pano kendiliğinden sol yarıya geçer. Bu iki ayar Android 10'da
-     * gizli API (ActivityOptions.setLaunchWindowingMode / setSplitScreenCreateMode); erişilemezse null.
-     */
-    private fun splitOptions(activity: Activity, intent: Intent): Bundle? {
-        if (activity.isInMultiWindowMode) {
-            intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
-            return ActivityOptions.makeBasic().toBundle()
-        }
-        return runCatching {
-            val o = ActivityOptions.makeBasic()
-            val int = Int::class.javaPrimitiveType
-            // WINDOWING_MODE_SPLIT_SCREEN_PRIMARY = 3, SPLIT_SCREEN_CREATE_MODE_BOTTOM_OR_RIGHT = 1
-            ActivityOptions::class.java.getMethod("setLaunchWindowingMode", int).invoke(o, 3)
-            ActivityOptions::class.java.getMethod("setSplitScreenCreateMode", int).invoke(o, 1)
-            o.toBundle()
-        }.onFailure { Log.w("Launch", "bölünmüş ekran seçenekleri: $it") }.getOrNull()
-    }
-
-    /**
-     * BYD bölünmüş ekranda yeni uygulamayı hep sola koyuyor (yerleşim isteğini yok sayıyor).
-     * Bölünme oturunca Pano sağdaysa, BYD'nin "iki parmakla yer değiştir" yayınıyla taraflar
-     * değiştirilir (SystemUI'deki Divider bu yayını dinliyor; ayırıcıdaki ⇄ düğmesiyle aynı iş).
-     */
-    private fun keepPanoOnLeft(activity: Activity) {
-        val handler = android.os.Handler(android.os.Looper.getMainLooper())
-        var tries = 0
-        fun check() {
-            tries++
-            if (activity.isFinishing) return
-            if (!activity.isInMultiWindowMode) {
-                if (tries < 6) handler.postDelayed(::check, 250)
-                return
-            }
-            val loc = IntArray(2)
-            activity.window.decorView.getLocationOnScreen(loc)
-            if (loc[0] > 0) {
-                Log.i("Launch", "Pano sağda kaldı (x=${loc[0]}), taraflar değiştiriliyor")
-                runCatching { activity.sendBroadcast(Intent(BYD_SPLIT_SWAP)) }
-            }
-        }
-        handler.postDelayed(::check, 400)
-    }
-
-    private const val BYD_SPLIT_SWAP = "byd.intent.action.DOUBLE_FINGER_SWAP"
-
     private fun start(context: Context, intent: Intent, failMessage: String, anchor: LaunchAnchor? = null, side: Boolean = false) {
         try {
             val activity = if (side && sideBySide) context.findActivity() else null
-            val opts = if (activity != null) splitOptions(activity, intent) ?: options(anchor) else options(anchor)
-            val wasSplit = activity?.isInMultiWindowMode == true
-            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts)
-            if (activity != null) {
-                Log.i("Launch", "yan yana açıldı: ${intent.component ?: intent.`package` ?: intent.action}")
-                if (!wasSplit) keepPanoOnLeft(activity)
+            var panel = false
+            val opts = when {
+                activity == null -> options(anchor)
+                activity.isInMultiWindowMode -> {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
+                    ActivityOptions.makeBasic().toBundle()
+                }
+                else -> app.pano.launcher.system.SidePanel.options()?.also { panel = true } ?: options(anchor)
             }
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts)
+            if (panel) app.pano.launcher.system.SidePanel.opened(intent)
             lastLaunchAt = SystemClock.uptimeMillis()
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(context, failMessage, Toast.LENGTH_SHORT).show()

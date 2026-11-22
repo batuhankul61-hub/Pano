@@ -71,6 +71,13 @@ class MainActivity : ComponentActivity() {
         super.onWindowFocusChanged(hasFocus)
         // Başka uygulamadan dönünce sistem çubuğu yeniden görünebiliyor; ayar yeniden uygulanır.
         if (hasFocus && Settings.state.value.hideSystemBar) applySystemBar(true)
+        // Sağ paneldeki uygulama, Pano'ya dokunulunca arkaya düşer; gerekirse geri getirilir.
+        app.pano.launcher.system.SidePanel.onTopResumed(this, hasFocus)
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        app.pano.launcher.system.SidePanel.onTouch(this, ev)
+        return super.dispatchTouchEvent(ev)
     }
 
     /** Ana ekran tuşuna basılınca her zaman ana sayfaya dön. */

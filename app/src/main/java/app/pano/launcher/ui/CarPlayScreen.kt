@@ -322,6 +322,7 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                         }
                     }
                     // Tesla tarzı sağ ekran: harita ve uygulama çubuğu açık kalır.
+                    SidePanelArea(Modifier.fillMaxSize())
                     RightScreenHost(screen, onNavigate, Modifier.fillMaxSize())
                   }
                     AnimatedVisibility(
@@ -543,6 +544,31 @@ private fun Dashboard(modifier: Modifier) {
 /** Alt sıradaki küçük adaların (favoriler, Tüketim) ortak yüksekliği. */
 private val IslandHeight = 112.dp
 
+/**
+ * Sağ panelin ekrandaki yerini ölçer (görünmez): başka uygulamalar tam bu sınırlarda pencere
+ * olarak açılır ([app.pano.launcher.system.SidePanel]). Hesap RightScreenHost'la aynı.
+ */
+@Composable
+private fun SidePanelArea(modifier: Modifier) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    BoxWithConstraints(modifier) {
+        val unit = (maxWidth - 36.dp) / 3.15f
+        val width = maxWidth - unit * 1.25f - 18.dp
+        Box(
+            Modifier.align(Alignment.CenterEnd).width(width).fillMaxHeight()
+                .onGloballyPositioned { c ->
+                    val r = c.boundsInWindow()
+                    val loc = IntArray(2)
+                    // boundsInWindow pencereye göre; pencerenin ekrandaki yeri kök görünümden alınır.
+                    view.rootView.getLocationOnScreen(loc)
+                    app.pano.launcher.system.SidePanel.bounds = android.graphics.Rect(
+                        loc[0] + r.left.toInt(), loc[1] + r.top.toInt(), loc[0] + r.right.toInt(), loc[1] + r.bottom.toInt(),
+                    )
+                },
+        )
+    }
+}
+
 /** Sağ ekranda ne açık: bir web uygulaması ya da Pano'nun kendi ekranı (Uygulamalar, Ayarlar). */
 private sealed interface RightContent {
     data class Web(val page: AppSheet.Page) : RightContent
@@ -565,7 +591,7 @@ private fun RightScreenHost(screen: Screen, onNavigate: (Screen) -> Unit, modifi
     val native = screen == Screen.Apps || screen == Screen.Settings
 
     // Aynı anda tek içerik: yerel ekran seçilince web kapanır, web açılınca yerel ekran kapanır.
-    LaunchedEffect(screen) { if (native) AppSheet.close() }
+    LaunchedEffect(screen) { if (native) { AppSheet.close(); app.pano.launcher.system.SidePanel.close() } }
     val music = AppSheet.music
     val navPanel = AppSheet.nav
     LaunchedEffect(page, music, navPanel) { if ((page != null || music || navPanel) && native) onNavigate(Screen.Home) }
@@ -1746,7 +1772,7 @@ private fun DockItemView(control: DockControl, climate: ClimateState, onNavigate
         Box(Modifier.pressScale()) { RoundIconButton(i, label, onClick, c.chip, c.text, size = 58.dp, iconSize = 24.dp) }
 
     when (control) {
-        DockControl.Home -> icon(PanoIcons.Home, "Ana pano") { AppSheet.close(); onNavigate(Screen.Home) }
+        DockControl.Home -> icon(PanoIcons.Home, "Ana pano") { AppSheet.close(); app.pano.launcher.system.SidePanel.close(); onNavigate(Screen.Home) }
         DockControl.Temperature -> Row(verticalAlignment = Alignment.CenterVertically) {
             // Tek bölgede tek, geniş sürgü ve yanında derece derece ‹ ›; çift bölgede sürücü sürgüsü.
             if (!climate.dualZone) {
