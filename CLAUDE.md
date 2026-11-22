@@ -12,7 +12,10 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 .\gradlew.bat :app:installDebug         # emülatöre kur
 ```
 
-- Emülatör: AVD `PanoCar` (`emulator-5554`), 1920×1080, 240 dpi. adb: `$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe`.
+- Emülatörler (adb: `$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe`; kullanıcının kendi PowerShell'inde bu yol `C:\Users\batuh\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\Android\Sdk\...`):
+  - **`PanoCar10` (`-port 5556` → `emulator-5556`): araca en yakın olan.** Android 10 (API 29, google_apis), 1280×720, 160 dpi; araçtaki gibi `enable_freeform_support=1`, `force_resizable_activities=1`, Pano'ya SYSTEM_ALERT_WINDOW ve WRITE_SECURE_SETTINGS verildi. Sağ panel, sistem çubukları, bölünmüş ekran burada denenir. Başlat: `emulator.exe -avd PanoCar10 -port 5556`. İkisi açıkken kurulum için `$env:ANDROID_SERIAL = "emulator-5556"`.
+  - `PanoCar` (`emulator-5554`): Android 15, 1920×1080, 240 dpi; pencere/çubuk davranışı araçtan farklı.
+- Araç (BYD Atto 2, DiLink 3.0, Android 10, 1280×720): ana ekran aracın kendi launcher'ı (`aracın launcher paketi`), Pano normal uygulama olarak çalışır. Freeform açık. Araçta Google servisleri ve TTS yok. Spotify'ı `com.vivid.music.byd` kabuğu açar.
 - Ekran görüntüsü: `adb shell screencap -p /sdcard/x.png` + `adb pull` (PowerShell'de `exec-out ... >` ikili dosyayı bozar).
 - Ayarları değiştirmek için (yalnızca debug sürümde): `adb shell run-as app.pano.launcher ...` ile `shared_prefs/pano_style.xml`.
 - Emülatör yavaş: kare süresi ~28 ms civarında takılıyor ve bu uygulamadan kaynaklanmıyor. Performansı gerçek cihazda değerlendir.
@@ -34,6 +37,9 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
   - BYD veri yolu ek izin istemiyor (ESMER-UI'ye göre); logcat etiketi `VehicleHub`/`BydBus`.
   - Emülatörde `adb emu geo fix` GNSS'e ulaşmıyor; GPS hızını test sağlayıcıyla dene: `adb shell appops set com.android.shell android:mock_location allow`, `adb shell cmd location providers add-test-provider gps`, `... set-test-provider-enabled gps true`, sonra saniyede bir `... set-test-provider-location gps --location 41.0082,28.9784` (her seferinde konumu biraz kaydır). Bitince `remove-test-provider gps`.
   - Worktree'de `local.properties` yok; derlemeden önce ana checkout'tan kopyala.
+- `system/SidePanel.kt` + `system/PanelFrame.kt`: CarPlay düzeninde uygulamalar Pano'nun sağ panelinde **freeform pencere** olarak açılır (`Launch.sideBySide`). Android 10 kuralları: Pano'ya dokunmak pencereyi arkaya atar (SidePanel geri getirir); yeni pencere eski bir pencereyle köşe çakışırsa 80 px kaydırılır (paket adından yuva); freeform görünürken sistem çubukları zorla ve opak gösterilir (Pano o zaman çubuklara yer açar). Çerçeve "diğer uygulamaların üzerinde" katmanlarıdır.
+- `system/SystemActions.kt`: dock'taki Geri / Son uygulamalar / Yarım ekran (erişilebilirlik hizmeti; BYD'de Erişilebilirlik menüsü yok, Pano izinle kendini açar) ve döndürme (`byd.intent.action.DIRECT_ROTATION`). `system/SystemBars.kt`: `policy_control=immersive.full=*`. BYD SystemUI yayınları: sesli asistan `com.intent.action.StartVoice_From_Launcher` (HardKeyReceiver), bölünmüş ekranda taraf değiştir `byd.intent.action.DOUBLE_FINGER_SWAP`.
+- `navigation/PanoNav.kt` + `RouteEngine.kt`: Pano'nun kendi navigasyonu (Photon arama, FOSSGIS Valhalla Türkçe rota, ilerleme, yeniden rota, TTS).
 
 ## Kurallar
 
