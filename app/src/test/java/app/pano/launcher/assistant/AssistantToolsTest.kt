@@ -1,0 +1,100 @@
+package app.pano.launcher.assistant
+
+import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/** Araç çağrısının doğru katmana, doğru değerlerle gittiğini dener (sahte katmanla). */
+class AssistantToolsTest {
+
+    private class FakeBackend : AssistantBackend {
+        val calls = mutableListOf<String>()
+        var climate: ClimateChange? = null
+        override suspend fun climate(change: ClimateChange) = ok("climate").also { climate = change }
+        override suspend fun navigateTo(query: String, start: Boolean) = ok("nav:$query:$start")
+        override suspend fun stopNavigation() = ok("stopNav")
+        override suspend fun media(action: MediaAction) = ok("media:$action")
+        override suspend fun openApp(name: String) = ok("app:$name")
+        override suspend fun vehicleStatus() = ok("vehicle")
+        override suspend fun weather() = ok("weather")
+        private fun ok(s: String): JSONObject { calls += s; return JSONObject().put("ok", s) }
+    }
+
+    private fun call(name: String, args: String = "{}", b: FakeBackend = FakeBackend()) =
+        b to runBlocking { AssistantTools.run(ToolCall("1", name, JSONObject(args)), b) }
+
+    @Test fun climateArgsParsed() {
+        val (b, r) = call("set_climate", """{"temperature":21.5,"ac":false,"fan":3.0,"auto":"true"}""")
+        assertEquals(listOf("climate"), b.calls)
+        assertEquals(ClimateChange(temperature = 21.5f, ac = false, fan = 3, auto = true), b.climate)
+        assertFalse(r.has("error"))
+    }
+
+    @Test fun emptyClimateIsError() {
+        val (b, r) = call("set_climate")
+        assertTrue(b.calls.isEmpty())
+        assertTrue(r.has("error"))
+    }
+
+    @Test fun navigationDefaultsToStart() {
+        assertEquals(listOf("nav:Kadıköy:true"), call("navigate_to", """{"destination":" Kadıköy "}""").first.calls)
+        assertEquals(listOf("nav:Ev:false"), call("navigate_to", """{"destination":"Ev","start":false}""").first.calls)
+        assertTrue(call("navigate_to", """{"destination":""}""").second.has("error"))
+        assertEquals(listOf("stopNav"), call("stop_navigation").first.calls)
+    }
+
+    @Test fun mediaActions() {
+        listOf("play" to MediaAction.Play, "pause" to MediaAction.Pause, "NEXT" to MediaAction.Next, "previous" to MediaAction.Previous, "status" to MediaAction.Status)
+            .forEach { (arg, action) -> assertEquals(listOf("media:$action"), call("media_control", """{"action":"$arg"}""").first.calls) }
+        assertTrue(call("media_control", """{"action":"louder"}""").second.has("error"))
+    }
+
+    @Test fun otherTools() {
+        assertEquals(listOf("app:Spotify"), call("open_app", """{"name":"Spotify"}""").first.calls)
+        assertEquals(listOf("vehicle"), call("vehicle_status").first.calls)
+        assertEquals(listOf("weather"), call("weather").first.calls)
+    }
+
+    @Test fun unknownAndPhysicalToolsRejected() {
+        listOf("lock_doors", "open_trunk", "fold_mirrors", "open_window").forEach {
+            val (b, r) = call(it)
+            assertTrue(b.calls.isEmpty())
+            assertTrue(r.has("error"))
+        }
+        val names = (0 until AssistantTools.declarations().length()).map { AssistantTools.declarations().getJSONObject(it).getString("name") }
+        assertEquals(listOf("set_climate", "navigate_to", "stop_navigation", "media_control", "open_app", "vehicle_status", "weather"), names)
+    }
+
+    @Test fun appMatcher() {
+        val apps = listOf("Spotify" to "com.spotify.music", "YouTube Music" to "com.google.android.apps.youtube.music", "YouTube" to "com.google.android.youtube", "Müzik" to "com.byd.mediacenter")
+        assertEquals("Spotify", AppMatcher.best("spotify", apps)?.first)
+        assertEquals("YouTube", AppMatcher.best("youtube", apps)?.first)
+        assertEquals("YouTube Music", AppMatcher.best("youtube music", apps)?.first)
+        assertEquals("Müzik", AppMatcher.best("muzik", apps)?.first)
+        assertNull(AppMatcher.best("waze", apps))
+    }
+
+    @Test fun protocolRoundTrip() {
+        val setup = JSONObject(LiveProtocol.setup("talimat", AssistantTools.declarations(), null)).getJSONObject("setup")
+        assertEquals("models/gemini-3.8-live", setup.getString("model"))
+        assertEquals("AUDIO", setup.getJSONObject("generationConfig").getJSONArray("responseModalities").getString(0))
+        assertEquals(7, setup.getJSONArray("tools").getJSONObject(0).getJSONArray("functionDeclarations").length())
+
+        val events = LiveProtocol.parse(
+            """{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AAA="}}]},"outputTranscription":{"text":"Tamam"},"turnComplete":true}}""",
+        )
+        assertEquals(listOf(LiveEvent.Audio("AAA="), LiveEvent.ModelText("Tamam"), LiveEvent.TurnComplete), events)
+
+        val tool = LiveProtocol.parse("""{"toolCall":{"functionCalls":[{"id":"a1","name":"weather","args":{}}]}}""").single() as LiveEvent.Tools
+        assertEquals("weather", tool.calls.single().name)
+
+        val resp = JSONObject(LiveProtocol.toolResponse(listOf(ToolResult("a1", "weather", JSONObject().put("result", 1)))))
+        assertEquals("a1", resp.getJSONObject("toolResponse").getJSONArray("functionResponses").getJSONObject(0).getString("id"))
+        assertEquals(listOf(LiveEvent.SetupComplete), LiveProtocol.parse("""{"setupComplete":{}}"""))
+        assertEquals(listOf(LiveEvent.ResumeHandle("h")), LiveProtocol.parse("""{"sessionResumptionUpdate":{"newHandle":"h","resumable":true}}"""))
+    }
+}

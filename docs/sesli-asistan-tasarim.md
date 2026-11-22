@@ -1,6 +1,6 @@
 # Pano'nun kendi sesli asistanı: tasarım notu
 
-Durum: **öneri, onay bekliyor.** Kod yazılmadı. 1. aşama (dock'taki "Sesli asistan" düğmesi BYD'nin
+Durum: **B (Gemini Live) uygulandı**, bkz. 5. bölüm. 1. aşama (dock'taki "Sesli asistan" düğmesi BYD'nin
 asistanını ya da Android'in sesli komutunu açıyor) yapıldı.
 
 ## 1. Araçta önce bakılacaklar (araç bağlıyken, park halinde)
@@ -63,3 +63,29 @@ Windows'a özel. Taşınabilecekler:
    bulunur, konuşma kaydı tutulmaz.
 
 Onay gereken kararlar: B'nin ücretli olması, sesin Google'a gitmesi ve API anahtarının nerede tutulacağı.
+
+## 5. Uygulama (Kasım 2026): B seçildi — Pano Asistan
+
+Kullanıcı kararı: Gemini Live, anahtarı kendisi Pano Ayarları → Pano Asistan'a girer; ücret ve sesin Google'a
+gitmesi kabul edildi. Kod `assistant/` paketinde.
+
+- **Uç nokta:** `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=…`
+- **Model:** `models/gemini-3.8-live` (Google'ın önerdiği Live modeli; doğal ses, Türkçe dahil dili kendi seçer), ses `Kore`.
+  Değiştirmek için `LiveProtocol.MODEL`.
+- **Ses:** mikrofon 16 kHz PCM (`AudioRecord`, VOICE_RECOGNITION, varsa yankı/gürültü bastırma), cevap 24 kHz
+  (`AudioTrack`, USAGE_ASSISTANT). Oturum boyunca ses odağı `GAIN_TRANSIENT_MAY_DUCK`: müzik kısılır.
+  Hoparlör sesi mikrofona girip modelin sözünü kesmesin diye asistan konuşurken mikrofon gönderilmez.
+- **Araçlar:** `set_climate`, `navigate_to`, `stop_navigation`, `media_control`, `open_app`, `vehicle_status`,
+  `weather`. Fiziksel hareket eden hiçbir şey yok. `vehicle_status` önizlemede örnek değerleri modele vermez.
+- **Oturum:** dock'taki ✦ "Pano Asistan" düğmesi (🎤 hâlâ BYD asistanı). 12 sn konuşma olmazsa kapanır, en fazla
+  10 dk. `goAway` gelince `sessionResumption` anahtarıyla yeniden bağlanır.
+- **Anahtar:** Android Keystore AES-GCM ile şifreli SharedPreferences (`pano_assistant`). Loglanmaz.
+
+**Maliyet hesabı** (ücretli katman, Kasım 2026; güncelini aistudio.google.com/docs/pricing'den doğrula): ses giriş
+$3 / 1M token, ses çıkış $12 / 1M token, ses 25 token/sn. Yani dinlenen her dakika ≈ $0,0045, asistanın konuştuğu her
+dakika ≈ $0,018. Live'da her turda konuşma geçmişi yeniden giriş token'ı sayılır, uzun oturum dakika başına
+pahalılaşır. Gerçek tüketim: logcat'te `PanoAsistan` etiketli `token:` satırları ve AI Studio'daki kullanım sayfası.
+
+**Araçta denenecekler:** mikrofonun gerçekten sürücüyü duyması (BYD'de VOICE_RECOGNITION kaynağı), hoparlör yankısı,
+müziğin kısılıp geri gelmesi, hotspot'ta gecikme, Türkçe anlama, klimanın araca gitmesi (`BydClimate`), navigasyon
+konumu, sağ panelde uygulama açma.

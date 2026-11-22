@@ -1830,6 +1830,10 @@ private fun DockItemView(control: DockControl, climate: ClimateState, onNavigate
         DockControl.Music -> icon(PanoIcons.Music, "Müzik") { Launch.music(context, playing?.packageName) }
         DockControl.Phone -> icon(PanoIcons.Phone, "Telefon") { Launch.phone(context) }
         DockControl.Voice -> icon(PanoIcons.Mic, "Sesli asistan") { Launch.voiceAssistant(context) }
+        DockControl.PanoAssistant -> {
+            val assistant = app.pano.launcher.assistant.rememberAssistantLauncher { onNavigate(Screen.Settings) }
+            icon(PanoIcons.Assistant, "Pano Asistan", assistant)
+        }
         DockControl.Back -> icon(PanoIcons.Back, "Geri") { app.pano.launcher.system.SystemActions.back(context) }
         DockControl.Split -> icon(PanoIcons.Split, "Yarım ekran") { app.pano.launcher.system.SystemActions.splitScreen(context) }
         DockControl.Recents -> icon(PanoIcons.Recents, "Son uygulamalar") { app.pano.launcher.system.SystemActions.recents(context) }
@@ -1945,6 +1949,7 @@ private fun dockIcon(control: DockControl): ImageVector = when (control) {
     DockControl.Music -> PanoIcons.Music
     DockControl.Phone -> PanoIcons.Phone
     DockControl.Voice -> PanoIcons.Mic
+    DockControl.PanoAssistant -> PanoIcons.Assistant
     DockControl.Back -> PanoIcons.Back
     DockControl.Split -> PanoIcons.Split
     DockControl.Recents -> PanoIcons.Recents

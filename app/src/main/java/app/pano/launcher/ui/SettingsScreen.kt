@@ -35,7 +35,18 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import app.pano.launcher.Launch
+import app.pano.launcher.assistant.AssistantKey
 import app.pano.launcher.media.MediaHub
 import app.pano.launcher.settings.AccentChoice
 import app.pano.launcher.settings.DockStyle
@@ -89,6 +100,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                         style.hideSystemBar,
                     ) { on -> Settings.update { it.copy(hideSystemBar = on) } }
                 }
+
+                Group("Pano Asistan") { AssistantKeySettings() }
 
                 Group("Geliştirici") {
                     SwitchRowSetting(
@@ -187,6 +200,76 @@ private fun Group(title: String, content: @Composable ColumnScope.() -> Unit) {
             Modifier.fillMaxWidth().surface(RoundedCornerShape(26.dp), colors.card, colors.isDark, colors.hairline),
             content = content,
         )
+    }
+}
+
+/**
+ * Gemini API anahtarı. Kullanıcı kendisi girer; anahtar yalnızca bu cihazda şifreli saklanır
+ * ([AssistantKey]) ve ekranda hiçbir zaman tamamı gösterilmez.
+ */
+@Composable
+private fun AssistantKeySettings() {
+    val colors = LocalPano.current
+    val context = LocalContext.current
+    AssistantKey.load(context)
+    val hasKey by AssistantKey.hasKey
+    val hint by AssistantKey.hint
+    var draft by remember { mutableStateOf("") }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp)) {
+        Text("Gemini API anahtarı", color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        Text(
+            if (hasKey) "Kayıtlı ($hint). Dock'taki Pano Asistan düğmesiyle konuş."
+            else "Anahtar yok. aistudio.google.com → Get API key ile al ve buraya yapıştır.",
+            color = colors.secondary, fontSize = 15.sp, modifier = Modifier.padding(top = 3.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(top = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            BasicTextField(
+                value = draft,
+                onValueChange = { draft = it.trim() },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                textStyle = TextStyle(color = colors.text, fontSize = 18.sp),
+                cursorBrush = SolidColor(colors.text),
+                modifier = Modifier.weight(1f).height(60.dp).clip(RoundedCornerShape(16.dp)).background(colors.raised)
+                    .semantics { contentDescription = "Gemini API anahtarı" },
+                decorationBox = { field ->
+                    Box(Modifier.fillMaxSize().padding(horizontal = 18.dp), contentAlignment = Alignment.CenterStart) {
+                        if (draft.isEmpty()) Text(if (hasKey) "Değiştir" else "Anahtarı yapıştır", color = colors.tertiary, fontSize = 18.sp, maxLines = 1)
+                        field()
+                    }
+                },
+            )
+            SmallButton("Kaydet", enabled = draft.isNotEmpty(), color = colors.text) {
+                AssistantKey.set(context, draft)
+                focus.clearFocus()
+                draft = ""
+            }
+            if (hasKey) SmallButton("Sil", enabled = true, color = Accent.Red) { AssistantKey.clear(context) }
+        }
+        Text(
+            "Ses yalnızca düğmeye basınca açılır ve Google'a (Gemini Live) gider; konuşma kaydı tutulmaz. " +
+                "Kullanım Google hesabına ücretlendirilir. Anahtar bu cihazda şifreli saklanır.",
+            color = colors.secondary, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 12.dp),
+        )
+    }
+}
+
+@Composable
+private fun SmallButton(label: String, enabled: Boolean, color: Color, onClick: () -> Unit) {
+    val colors = LocalPano.current
+    Box(
+        Modifier.height(60.dp).clip(RoundedCornerShape(16.dp)).background(colors.raised)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 22.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = if (enabled) color else colors.tertiary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
