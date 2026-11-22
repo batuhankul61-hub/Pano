@@ -70,7 +70,7 @@ object Launch {
                 }
             }
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts)
-            if (panel) app.pano.launcher.system.SidePanel.opened(intent)
+            if (panel && activity != null) app.pano.launcher.system.SidePanel.opened(activity, intent)
             lastLaunchAt = SystemClock.uptimeMillis()
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(context, failMessage, Toast.LENGTH_SHORT).show()

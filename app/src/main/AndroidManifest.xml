@@ -11,6 +11,12 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
 
     <!-- Uygulama listesini görebilmek için (Android 11+) -->
+    <!-- Sağ paneldeki uygulamanın üstüne yuvarlak köşeli çerçeve için (kullanıcı izin verir) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Sistem çubuklarını tüm uygulamalarda gizlemek için; yalnızca adb ile verilebilir (pm grant) -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />

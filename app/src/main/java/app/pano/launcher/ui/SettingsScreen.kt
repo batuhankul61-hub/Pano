@@ -83,8 +83,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                     ) { on -> Settings.update { it.copy(showMessages = on) } }
                     Divider()
                     SwitchRowSetting(
-                        "Alt sistem çubuğunu gizle",
-                        "Pano tam ekran olur; çubuğu görmek için ekranın altından yukarı kaydır",
+                        "Sistem çubuklarını gizle",
+                        if (app.pano.launcher.system.SystemBars.canApplyGlobal(context)) "Üst ve alt çubuk her yerde gizli; görmek için ekran kenarından kaydır"
+                        else "Yalnızca Pano'da. Uygulamalarda da gizlemek için bir kez: adb shell pm grant app.pano.launcher android.permission.WRITE_SECURE_SETTINGS",
                         style.hideSystemBar,
                     ) { on -> Settings.update { it.copy(hideSystemBar = on) } }
                 }

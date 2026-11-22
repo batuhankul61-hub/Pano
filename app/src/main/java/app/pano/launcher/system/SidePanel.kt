@@ -62,31 +62,68 @@ object SidePanel {
     }
 
     /** Uygulamayı sağ panelde açacak seçenekler; panel ölçülmediyse ya da gizli API yoksa null. */
+    /**
+     * Android freeform pencereyi durum çubuğunun altına koymaz (çubuk görünürken aşağı iter).
+     * Çubuklar her yerde gizli değilse panel penceresi durum çubuğunun altından başlar; böylece
+     * pencere istenen yere oturur, çerçeve de hizalı kalır.
+     */
+    @Volatile var statusBarHeight = 0
+    @Volatile var barsHiddenEverywhere = false
+
     fun options(pkg: String? = current?.let { it.component?.packageName ?: it.`package` }): Bundle? {
-        val r = bounds ?: return null
+        val measured = bounds ?: return null
+        val r = if (!barsHiddenEverywhere && measured.top < statusBarHeight) Rect(measured).apply { top = statusBarHeight } else measured
         val (dx, dy) = slotFor(pkg)
         return runCatching {
             // Pencere panelden 10 px küçük, yuvaya göre yalnızca yeri değişir: iki yuva ya hem sol hem
             // sağ kenarda ya da hem üst hem alt kenarda ≥5 px ayrışır, hiçbir köşe çakışmaz.
-            val o = ActivityOptions.makeBasic()
-                .setLaunchBounds(Rect(r.left + dx, r.top + dy, r.right - (10 - dx), r.bottom - (10 - dy)))
+            val window = Rect(r.left + dx, r.top + dy, r.right - (10 - dx), r.bottom - (10 - dy))
+            val o = ActivityOptions.makeBasic().setLaunchBounds(window)
             ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
                 .invoke(o, WINDOWING_MODE_FREEFORM)
+            lastWindow = window
             o.toBundle()
         }.onFailure { Log.w(TAG, "pencere seçenekleri: $it") }.getOrNull()
     }
 
+    /** Paneldeki uygulama penceresinin istenen sınırları (çerçeve buna oturur). */
+    private var lastWindow: Rect? = null
+
+    /** Compose için: sağ panelde başka bir uygulama var mı (Pano o alanı boş bırakır). */
+    val openState = androidx.compose.runtime.mutableStateOf(false)
+
     /** [Launch] uygulamayı panelde açtıktan sonra çağırır. */
-    fun opened(intent: Intent) {
+    fun opened(activity: Activity, intent: Intent) {
         current = Intent(intent)
-        Log.i(TAG, "sağ panelde: ${intent.component ?: intent.`package`}")
+        openState.value = true
+        Log.i(TAG, "sağ panelde: ${intent.component ?: intent.`package`} istenen=$lastWindow panel=$bounds çubuk=$statusBarHeight her_yerde_gizli=$barsHiddenEverywhere")
+        val window = lastWindow ?: return
+        val label = runCatching {
+            val pm = activity.packageManager
+            val pkg = intent.component?.packageName ?: intent.`package` ?: pm.resolveActivity(intent, 0)?.activityInfo?.packageName
+            pm.getApplicationLabel(pm.getApplicationInfo(pkg!!, 0)).toString()
+        }.getOrDefault("")
+        // Pano'nun panel alanını boşaltması bir kare sürsün; çerçeve köşeleri o görüntüden alır.
+        handler.postDelayed({ if (current != null) PanelFrame.show(activity, Rect(window), label) }, 350)
     }
 
     /** Pano'da başka bir şey sağ paneli kullanacak (ana pano, Pano'nun kendi ekranları): bırak. */
     fun close() {
         if (current != null) Log.i(TAG, "sağ panel bırakıldı")
         current = null
+        openState.value = false
         pendingRaise = false
+        PanelFrame.hide()
+    }
+
+    /** Çerçevedeki ✕: uygulama arkaya alınır, Pano'nun kartları geri gelir (uygulama kapanmaz). */
+    fun dismiss(activity: Activity) {
+        close()
+        runCatching {
+            activity.startActivity(
+                Intent(activity, activity.javaClass).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
     }
 
     // ---- MainActivity'den ----------------------------------------------------

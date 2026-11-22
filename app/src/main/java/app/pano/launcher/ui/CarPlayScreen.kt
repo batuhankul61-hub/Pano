@@ -286,7 +286,9 @@ fun CarPlayApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Un
                     blobs.forEach { drawCircle(it.brush, it.radius, it.center) }
                 }
             }
-            .windowInsetsPadding(WindowInsets.safeDrawing),
+            // Çubuklar gizliyken onlara yer ayrılmaz: kenardan çekilince üstte görünürler, düzen ve sağ
+            // panelin yeri kaymaz (paneldeki uygulama penceresi yerinde kalır).
+            .then(if (LocalStyle.current.hideSystemBar) Modifier else Modifier.windowInsetsPadding(WindowInsets.safeDrawing)),
     ) {
       BoxWithConstraints(Modifier.fillMaxSize()) {
         // Bölünmüş ekranda (sağda başka uygulama) Pano dar kalır: sade düzen.
@@ -524,6 +526,11 @@ private fun Dashboard(modifier: Modifier) {
                 FavoritesIsland(Modifier.height(IslandHeight * parked).fillMaxWidth().graphicsLayer { alpha = parked }.clipToBounds())
             }
         }
+        // Sağ panelde başka bir uygulama açıkken bu alan boş kalır (uygulama penceresi burada durur).
+        if (app.pano.launcher.system.SidePanel.openState.value) {
+            Spacer(Modifier.weight(1.9f).fillMaxHeight())
+            return@Row
+        }
         VehicleWidget(Modifier.weight(1f).fillMaxHeight())
         Column(Modifier.weight(0.9f).fillMaxHeight()) {
             if (parked > 0.001f) {
@@ -551,6 +558,7 @@ private val IslandHeight = 112.dp
 @Composable
 private fun SidePanelArea(modifier: Modifier) {
     val view = androidx.compose.ui.platform.LocalView.current
+    app.pano.launcher.system.PanelFrame.dark = glass().dark
     BoxWithConstraints(modifier) {
         val unit = (maxWidth - 36.dp) / 3.15f
         val width = maxWidth - unit * 1.25f - 18.dp

@@ -45,6 +45,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Settings.load(this)
+        // Pencere her zaman tüm ekranı kaplar; sistem çubukları görünüp kaybolunca pencere boyu
+        // değişmez (içerik kenar boşluklarını kendisi ayarlar). Sağ paneldeki uygulama penceresi
+        // Pano'nun ölçtüğü yerde kalsın diye gerekli.
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             val style = Settings.state.value
             // Ayar açıksa aracın alt sistem çubuğu gizlenir; alttan kaydırınca kısa süre görünür.
@@ -56,8 +60,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applySystemBar(hide: Boolean) {
+        // Sağ paneldeki uygulamalar ve tam ekran uygulamalar için de (izin verildiyse).
+        app.pano.launcher.system.SystemBars.applyGlobal(this, hide)
         val controller = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
-        val bars = androidx.core.view.WindowInsetsCompat.Type.navigationBars()
+        // Üst durum çubuğu ve alt sistem çubuğu birlikte; kenardan kaydırınca kısa süre görünür.
+        val bars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
         if (hide) {
             controller.systemBarsBehavior =
                 androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
