@@ -73,4 +73,11 @@ dependencies {
 
     // Harita: MapLibre (açık kaynak) + OpenFreeMap (ücretsiz, anahtar gerektirmez)
     implementation("org.maplibre.gl:android-sdk:13.7.1")
+
+    // Pano Asistan: Gemini Live'a WebSocket bağlantısı
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Birim testleri (JVM): Android'in org.json'u testte boş, gerçeği eklenir.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

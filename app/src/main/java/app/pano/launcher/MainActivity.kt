@@ -139,6 +139,8 @@ fun PanoApp(screen: Screen, onNavigate: (Screen) -> Unit) {
             }
             // WhatsApp / SMS mesajları her iki düzenin üstünde kısa bir banner olarak görünür.
             app.pano.launcher.ui.MessageBanner()
+            // Pano Asistan açıkken dock'un üstündeki gösterge.
+            app.pano.launcher.assistant.AssistantOverlay()
         }
     }
 }

@@ -27,6 +27,8 @@ enum class DockControl(val label: String, val group: String) {
     Music("Müzik", "Gezinme"),
     Phone("Telefon", "Gezinme"),
     Voice("Sesli asistan", "Gezinme"),
+    /** Pano'nun kendi asistanı (Gemini Live); yukarıdaki BYD'nin asistanını açar. */
+    PanoAssistant("Pano Asistan", "Gezinme"),
     Split("Yarım ekran", "Gezinme"),
     Recents("Son uygulamalar", "Gezinme"),
     Rotate("Ekranı döndür", "Ayarlar"),
@@ -43,13 +45,14 @@ object DockStore {
     /** Varsayılan: aracın kendi alt çubuğundaki her şey (geri, ev, sıcaklık, yarım ekran, son uygulamalar, fan, döndürme, ayarlar, uygulamalar) + Pano'nunkiler. */
     val DEFAULT: Set<DockControl> = setOf(
         DockControl.Back, DockControl.Home, DockControl.Temperature, DockControl.Auto, DockControl.AC, DockControl.Fan,
-        DockControl.ClimateDetail, DockControl.PassengerTemperature, DockControl.Voice, DockControl.Split,
+        DockControl.ClimateDetail, DockControl.PassengerTemperature, DockControl.Voice, DockControl.PanoAssistant, DockControl.Split,
         DockControl.Recents, DockControl.Rotate, DockControl.Apps, DockControl.CarSettings,
     )
 
     /** Sonradan eklenen kontroller; kayıtlı seçimi olan kullanıcıya da bir kez eklenir. */
     private val ADDED_LATER = listOf(
         DockControl.Voice, DockControl.Back, DockControl.Split, DockControl.Recents, DockControl.Rotate, DockControl.Apps,
+        DockControl.PanoAssistant,
     )
     private const val KEY_OFFERED = "offered"
 
