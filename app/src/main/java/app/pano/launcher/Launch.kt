@@ -108,11 +108,29 @@ object Launch {
     private const val BYD_VOICE = "com.byd.vrassistant"
 
     /**
-     * Sesli asistanı açar. Sıra: BYD asistanının açılış ekranı → aynı paketin sesli komut /
-     * asistan ekranı → Android'in standart sesli komutu (`ACTION_VOICE_COMMAND`) → eller serbest
-     * sesli arama (`RecognizerIntent`) → genel asistan (`ACTION_ASSIST`).
+     * BYD asistanının launcher'lar için açtığı alıcı: bu yayın, direksiyondaki ses düğmesi gibi
+     * asistanı dinlemeye başlatır (BYD Atto 2 / DiLink 3.0'da denendi). Asistanın başlatıcı
+     * ekranı yok, standart sesli komut eylemlerini de karşılamıyor.
+     */
+    private const val BYD_VOICE_RECEIVER = "com.byd.vrassistant.receiver.HardKeyReceiver"
+    private const val BYD_VOICE_START = "com.intent.action.StartVoice_From_Launcher"
+
+    private fun isInstalled(context: Context, pkg: String) =
+        runCatching { context.packageManager.getPackageInfo(pkg, 0) }.isSuccess
+
+    /**
+     * Sesli asistanı açar. Sıra: BYD asistanı (launcher yayını) → BYD asistanının açılış ekranı →
+     * Android'in standart sesli komutu (`ACTION_VOICE_COMMAND`) → eller serbest sesli arama
+     * (`RecognizerIntent`) → genel asistan (`ACTION_ASSIST`).
      */
     fun voiceAssistant(context: Context, anchor: LaunchAnchor? = null) {
+        if (isInstalled(context, BYD_VOICE)) {
+            val sent = runCatching {
+                context.sendBroadcast(Intent(BYD_VOICE_START).setClassName(BYD_VOICE, BYD_VOICE_RECEIVER))
+            }.onFailure { Log.w("Launch", "BYD sesli asistan yayını: $it") }.isSuccess
+            Log.i("Launch", "sesli asistan: BYD yayını ${if (sent) "gönderildi" else "gönderilemedi"}")
+            if (sent) return
+        }
         val candidates = listOfNotNull(
             context.packageManager.getLaunchIntentForPackage(BYD_VOICE),
             Intent(Intent.ACTION_VOICE_COMMAND).setPackage(BYD_VOICE),
