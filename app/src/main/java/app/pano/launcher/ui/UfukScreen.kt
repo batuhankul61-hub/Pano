@@ -276,12 +276,6 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
         // kilit ortada, şarj kapağı önde (sağda). Sürüşte gizlenir, çizim büyür.
         Spacer(Modifier.weight(0.25f))
         val open = v.openings?.open.orEmpty()
-        if (open.isNotEmpty()) {
-            Text(
-                open.take(3).joinToString(" · ") { "${it.label} açık" }, color = Accent.Red, fontSize = 18.sp,
-                fontWeight = FontWeight.Bold, maxLines = 2, modifier = Modifier.padding(bottom = 8.dp),
-            )
-        }
         AnimatedVisibility(!locked && !compact, enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs))) {
             val notYet = { Launch.notConnectedYet(context) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -294,7 +288,21 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
                 CarHotspot(PanoIcons.Bolt, "Şarj", notYet, Modifier)
             }
         }
-        CarIllustration(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp), dark = c.isDark, background = Color.Transparent)
+        // Açık kapı uyarısı çizimin üstüne bindirilir; sütuna eklenseydi aracı aşağı iterdi.
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            CarIllustration(Modifier.fillMaxSize().padding(vertical = 4.dp), dark = c.isDark, background = Color.Transparent)
+            androidx.compose.animation.AnimatedVisibility(
+                open.isNotEmpty(), Modifier.align(Alignment.TopCenter),
+                enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs)),
+            ) {
+                Text(
+                    open.take(3).joinToString(" · ") { "${it.label} açık" }, color = Accent.Red, fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold, maxLines = 2,
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(c.glass)
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                )
+            }
+        }
         // Müzik yalnızca bir şey çalıyorsa yer kaplar.
         NowPlayingStrip(compact)
     }
