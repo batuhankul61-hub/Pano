@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +62,7 @@ import app.pano.launcher.settings.ThemeMode
 import app.pano.launcher.ui.theme.Accent
 import app.pano.launcher.ui.theme.LocalPano
 
-private const val VERSION = "0.1.0"
+private val VERSION get() = "${app.pano.launcher.update.Updater.currentName} (${app.pano.launcher.update.Updater.currentCode})"
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
@@ -104,6 +105,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
 
                 Group("Pano Asistan") { AssistantKeySettings() }
+
+                Group("Güncelleme") { UpdateSettings() }
 
                 Group("Geliştirici") {
                     SwitchRowSetting(
@@ -380,5 +383,107 @@ private fun AccentPicker(selected: AccentChoice) {
                     .semantics { contentDescription = "Vurgu rengi: ${choice.label}" },
             )
         }
+    }
+}
+
+/**
+ * Pano'nun kendini güncellemesi: GitHub erişim anahtarı (yalnızca okuma), "Denetle" ve varsa
+ * "Güncelle". Kurulum Android'in yükleyicisiyle olur; kullanıcı ekranda onaylar.
+ */
+@Composable
+private fun UpdateSettings() {
+    val colors = LocalPano.current
+    val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val up = app.pano.launcher.update.Updater
+    up.token.load(context)
+    val hasToken by up.token.hasValue
+    val hint by up.token.hint
+    val status by up.status.collectAsState()
+    var draft by remember { mutableStateOf("") }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+
+    // Ayarlar açılınca (anahtar varsa) bir kez kendiliğinden denetle.
+    androidx.compose.runtime.LaunchedEffect(hasToken) {
+        if (hasToken && status is app.pano.launcher.update.Updater.Status.Idle) up.check(context)
+    }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp)) {
+        Text("Bu sürüm: $VERSION", color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        val line = when (val s = status) {
+            app.pano.launcher.update.Updater.Status.Idle -> if (hasToken) "Denetlenmedi" else "GitHub erişim anahtarı yok"
+            app.pano.launcher.update.Updater.Status.Checking -> "Denetleniyor…"
+            app.pano.launcher.update.Updater.Status.UpToDate -> "Güncel"
+            is app.pano.launcher.update.Updater.Status.Available -> "Yeni sürüm var: ${s.release.name}"
+            is app.pano.launcher.update.Updater.Status.Downloading -> "İndiriliyor… %${(s.progress * 100).toInt()}"
+            app.pano.launcher.update.Updater.Status.Installing -> "Yükleniyor… Ekrandaki onayı ver."
+            is app.pano.launcher.update.Updater.Status.Failed -> s.message
+        }
+        Text(line, color = colors.secondary, fontSize = 15.sp, modifier = Modifier.padding(top = 3.dp))
+
+        Row(
+            Modifier.fillMaxWidth().padding(top = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val s = status
+            if (s is app.pano.launcher.update.Updater.Status.Available) {
+                SmallButton("Güncelle", enabled = true, color = Accent.Green) {
+                    scope.launch { up.downloadAndInstall(context, s.release) }
+                }
+            }
+            SmallButton(
+                "Denetle",
+                enabled = hasToken && s !is app.pano.launcher.update.Updater.Status.Checking &&
+                    s !is app.pano.launcher.update.Updater.Status.Downloading,
+                color = colors.text,
+            ) { scope.launch { up.check(context) } }
+        }
+        if (status is app.pano.launcher.update.Updater.Status.Available) {
+            val notes = (status as app.pano.launcher.update.Updater.Status.Available).release.notes
+            if (notes.isNotBlank()) {
+                Text(notes.take(400), color = colors.secondary, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 10.dp))
+            }
+        }
+
+        Text(
+            if (hasToken) "GitHub erişim anahtarı kayıtlı ($hint)" else "GitHub erişim anahtarı",
+            color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 20.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(top = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            BasicTextField(
+                value = draft,
+                onValueChange = { draft = it.trim() },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                textStyle = TextStyle(color = colors.text, fontSize = 18.sp),
+                cursorBrush = SolidColor(colors.text),
+                modifier = Modifier.weight(1f).height(60.dp).clip(RoundedCornerShape(16.dp)).background(colors.raised)
+                    .semantics { contentDescription = "GitHub erişim anahtarı" },
+                decorationBox = { field ->
+                    Box(Modifier.fillMaxSize().padding(horizontal = 18.dp), contentAlignment = Alignment.CenterStart) {
+                        if (draft.isEmpty()) Text(if (hasToken) "Değiştir" else "github_pat_… yapıştır", color = colors.tertiary, fontSize = 18.sp, maxLines = 1)
+                        field()
+                    }
+                },
+            )
+            SmallButton("Kaydet", enabled = draft.isNotEmpty(), color = colors.text) {
+                up.token.set(context, draft)
+                focus.clearFocus()
+                draft = ""
+                scope.launch { up.check(context) }
+            }
+            if (hasToken) SmallButton("Sil", enabled = true, color = Accent.Red) { up.token.clear(context) }
+        }
+        Text(
+            "Depo özel olduğu için gerekli. GitHub → Settings → Developer settings → Fine-grained tokens: " +
+                "yalnızca \"Pano\" deposu, Contents: Read-only. Anahtar bu cihazda şifreli saklanır.",
+            color = colors.secondary, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 12.dp),
+        )
     }
 }

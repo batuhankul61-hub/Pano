@@ -15,6 +15,8 @@
     <!-- Uygulama listesini görebilmek için (Android 11+) -->
     <!-- Sağ paneldeki uygulamanın üstüne yuvarlak köşeli çerçeve için (kullanıcı izin verir) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Uygulama içi güncelleme: GitHub'dan indirilen yeni sürümü kurmak için (kullanıcı onaylar) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Sistem çubuklarını tüm uygulamalarda gizlemek için; yalnızca adb ile verilebilir (pm grant) -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
@@ -93,5 +95,14 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/pano_accessibility" />
         </service>
+
+        <!-- Uygulama içi güncellemenin yükleyici sonucu -->
+        <receiver
+            android:name=".update.Updater$InstallResult"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="app.pano.launcher.UPDATE_INSTALL" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

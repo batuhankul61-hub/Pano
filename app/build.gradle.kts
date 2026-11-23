@@ -5,6 +5,11 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+/** Sürüm kodu: HEAD'e kadarki commit sayısı. */
+val gitCommitCount: Int = runCatching {
+    providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }.standardOutput.asText.get().trim().toInt()
+}.getOrDefault(1)
+
 android {
     namespace = "app.pano.launcher"
     compileSdk = 36
@@ -13,8 +18,10 @@ android {
         applicationId = "app.pano.launcher"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // Sürüm kodu = git commit sayısı: her yeni commit daha büyük; uygulama içi güncelleme
+        // ("v<versionCode>" etiketli GitHub sürümü) bununla karşılaştırır. Git yoksa 1.
+        versionCode = gitCommitCount
+        versionName = "0.2.$gitCommitCount"
     }
 
     // Release imzası: proje kökündeki keystore.properties'ten okunur (depoya girmez).
@@ -56,6 +63,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
