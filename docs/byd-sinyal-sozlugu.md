@@ -119,18 +119,13 @@ durum yolu (aşağıda) denenmeli.
 ### 1b. Açık/kapalı durumu — `getWindowState(alan)`
 
 Yüzdeden **ayrı kimlikler.** Pano bunları `openings()` içinde yalnız log'a yazıyor
-(satır 311–313), gösterimde kullanmıyor. Dönüş değerleri **kapı gibi 0/1 DEĞİL:**
+(satır 311–313), gösterimde kullanmıyor.
 
-| Sabit | Değer |
-|-------|------:|
-| `WINDOW_OPEN_FULL` | 1 |
-| `WINDOW_CLOSE` | 2 |
-| `WINDOW_OPEN_HALF` | 4 |
-| `WINDOW_OPEN_PERCENT_MIN / MAX` | 0 / 100 |
-
-> ⚠️ **Yani bir durum sinyali `2` döndürürse cam KAPALIDIR.** `0`'ı "kapalı",
-> sıfırdan farklıyı "açık" sayan bir mantık, kapalı camı (2) açık gösterir —
-> yanlış "cam açık" bildiriminin olası kaynağı budur.
+`BYDAutoBodyworkDevice` içindeki `WINDOW_OPEN_FULL=1`, `WINDOW_CLOSE=2`,
+`WINDOW_OPEN_HALF=4` sabitleri **komut (yazma) kodlarıdır**, okuma ölçeği değil.
+Araçtan canlı okumada sürücü camı durumu kapalıyken `0` döndü (yüzde de `0`), yani
+**durum okuması da konum/0–100 gibi davranıyor, 1/2/4 enum'u değil.** (Cam
+session'ının araçtaki ölçümü.)
 
 Durum kimlikleri:
 
@@ -146,16 +141,38 @@ Durum kimlikleri:
 İlgili: `BODYWORK_LEFT_FRONT_WINDOW_PERMIT` (cam izni), `BODYWORK_CLOSE_WINDOW_FOR_RAIN`
 (yağmurda otomatik kapatma, 1=açık 2=kapalı), `BODYWORK_WINDOW_ANTIPINCH_CONFIG`.
 
-### Cam için öneri (cam session'ına)
+### Araçtaki gerçek durum (cam session'ının ölçümü) ve sonuç
 
-1. Araçta protokolü doğrula: `getprop sys.car.protocol`.
-2. Yolcu camlarında yüzde `65535` ise, aynı camın **durum** kimliğini (`..._WINDOW`)
-   oku; `1/2/4` ölçeğiyle yorumla (2 = kapalı).
-3. Emin olmak için ham tarama: Pano'da `BydBus.readRaw(id)` ile yukarıdaki yüzde ve
-   durum kimliklerini tek tek oku, hangisi `0..100` ya da `1/2/4` döndürüyor diye bak.
-   `BydBus.idOf("Bodywork", "BODYWORK_...")` çözülen kimliği (ve hex'i) verir;
-   logcat etiketi `BydBus`/`VehicleHub`.
-4. Hiçbir yoldan okunamıyorsa cam "bilinmiyor"dur — **asla "açık" varsayma.**
+Araçta (`isCanFD=true`) canlı ölçüm:
+
+| Cam | yüzde | durum |
+|-----|------:|------:|
+| Sol ön (sürücü) | `0` (geçerli) | `0` (geçerli) |
+| Sağ ön | `65535` | `65535` |
+| Sağ arka | `65535` | `65535` |
+| Sol arka | `255` | — |
+
+Kullanıcı yolcu camlarını fiziksel olarak açıp kapatırken `BODYWORK_` /
+`INSTRUMENT_` / `DOOR_LOCK_` / `BODY_` önekli **1487 sinyalin hiçbiri değişmedi**
+(aynı anda kapı olayları yakalandı, yani tarama çalışıyordu).
+
+**Sonuç: bu araçta (Atto 2, CAN-FD) yolcu camı konumu üst API katmanına hiç
+ulaşmıyor.** CAN→sinyal çözümü yerel `libbydautoservice.so` / `libbydauto.so`
+içinde yapılıyor; framework (`BYDAutoDeviceManager`) yalnızca bu servise AIDL
+istemcisi. Yolcu camları için sinyal orada çözülüp yayınlanmadığından ne
+`getInt` taraması ne de olay-dinleyici (`registerListener` + `onWindowStateChanged`
+/ `onWindowOpenPercentChanged`, aynı kimlikleri kullanır) işe yarar. Uygulamadan
+erişilemeyen alt yollar (VHAL `android.hardware.automotive.vehicle@2.0`, FissionCluster'ın
+kendi CAN hattı, ham CAN soketi) kök/özel izin ister, Pano için uygun değil.
+
+Değer anlamları: `65535` = sinyal yok/çözülmemiş (UNAVAILABLE), `255` = sinyal
+tanımlı ama ham değer geçersiz (sol arkada eski `0x38800020` kimliği tanınıyor
+ama veri gelmiyor), `0..100` = geçerli açıklık yüzdesi.
+
+**Pano için öneri:** Yolcu camları için ek/doğru kimlik aramak boşuna — yok.
+`65535` ve `255`'i (ve `0..100` dışını) **"bilinmiyor"** say; camı yalnız geçerli
+`0..100` okununca göster. Hiçbir camı "bilinmiyor" diye **"açık" varsayma** →
+yanlış "tüm camlar açık" bildirimi böyle kalkar. Sürücü camı gerçek değer verir.
 
 ---
 
