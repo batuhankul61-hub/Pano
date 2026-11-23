@@ -56,7 +56,11 @@ import app.pano.launcher.settings.DockStyle
 import app.pano.launcher.settings.FontChoice
 import app.pano.launcher.settings.LayoutStyle
 import app.pano.launcher.settings.LocalStyle
+import app.pano.launcher.settings.MapContrast
+import app.pano.launcher.settings.MapNightStyle
 import app.pano.launcher.settings.MapStyle
+import app.pano.launcher.settings.MapTextSize
+import app.pano.launcher.settings.RouteColor
 import app.pano.launcher.settings.Settings
 import app.pano.launcher.settings.ThemeMode
 import app.pano.launcher.ui.theme.Accent
@@ -169,9 +173,36 @@ fun SettingsScreen(onBack: () -> Unit) {
                             }, Modifier.width(440.dp))
                         }
                         Divider()
+                    }
+
+                    Group("Harita") {
                         OptionRow("Gündüz haritası") {
                             Segmented(MapStyle.entries.map { it.label }, style.map.ordinal, { i ->
                                 Settings.update { it.copy(map = MapStyle.entries[i]) }
+                            }, Modifier.width(440.dp))
+                        }
+                        Divider()
+                        OptionRow("Gece haritası") {
+                            Segmented(MapNightStyle.entries.map { it.label }, style.mapNight.ordinal, { i ->
+                                Settings.update { it.copy(mapNight = MapNightStyle.entries[i]) }
+                            }, Modifier.width(440.dp))
+                        }
+                        Divider()
+                        OptionRow("Kontrast") {
+                            Segmented(MapContrast.entries.map { it.label }, style.mapContrast.ordinal, { i ->
+                                Settings.update { it.copy(mapContrast = MapContrast.entries[i]) }
+                            }, Modifier.width(440.dp))
+                        }
+                        Divider()
+                        OptionRow("Yazı boyutu") {
+                            Segmented(MapTextSize.entries.map { it.label }, style.mapText.ordinal, { i ->
+                                Settings.update { it.copy(mapText = MapTextSize.entries[i]) }
+                            }, Modifier.width(440.dp))
+                        }
+                        Divider()
+                        OptionRow("Rota rengi") {
+                            Segmented(RouteColor.entries.map { it.label }, style.routeColor.ordinal, { i ->
+                                Settings.update { it.copy(routeColor = RouteColor.entries[i]) }
                             }, Modifier.width(440.dp))
                         }
                     }

@@ -52,6 +52,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import app.pano.launcher.Launch
 import app.pano.launcher.settings.LocalStyle
+import app.pano.launcher.settings.MapContrast
+import app.pano.launcher.settings.RouteColor
+import app.pano.launcher.settings.Settings
+import org.maplibre.android.style.expressions.Expression
+import org.maplibre.android.style.layers.SymbolLayer
 import app.pano.launcher.ui.theme.linkColor
 import app.pano.launcher.ui.theme.Accent
 import app.pano.launcher.ui.theme.LocalPano
@@ -80,8 +85,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 
 /** OpenFreeMap stilleri: ücretsiz, API anahtarı gerekmez, veriler OpenStreetMap'ten. */
-// Gündüz stili Ayarlar > Stil > Gündüz haritası'ndan seçiliyor (MapStyle).
-private const val STYLE_NIGHT = "https://tiles.openfreemap.org/styles/dark"
+// Gündüz ve gece stilleri Ayarlar > Harita'dan seçiliyor (MapStyle, MapNightStyle).
 
 /** Konum henüz bilinmiyorsa gösterilecek yer. */
 private val FALLBACK = LatLng(41.0082, 28.9784)
@@ -220,8 +224,13 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
     // Harita hazır olup konum katmanı açıldığında dolar; konum güncellemeleri buraya iletilir.
     var locationMap by remember { mutableStateOf(if (holder.locationOn) holder.map else null) }
 
-    val styleUrl = if (dark) STYLE_NIGHT else LocalStyle.current.map.dayUrl
-    LaunchedEffect(styleUrl, showLocation, bottomInset) {
+    val settings = LocalStyle.current
+    val styleUrl = if (dark) settings.mapNight.url else settings.map.dayUrl
+    val look = MapLook(dark, settings.mapContrast == MapContrast.High, settings.mapText.scale)
+    // Stil ve görünüm ayarı birlikte anahtar: biri değişince stil yeniden yüklenip ayar uygulanır.
+    val styleKey = "$styleUrl|$look"
+    val routeColor = settings.routeColor
+    LaunchedEffect(styleKey, showLocation, bottomInset) {
         mapView.getMapAsync { map ->
             holder.map = map
             map.uiSettings.apply {
@@ -240,21 +249,22 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
             if (map.cameraPosition.zoom < 3) {
                 map.cameraPosition = CameraPosition.Builder().target(FALLBACK).zoom(13.0).build()
             }
-            if (holder.styleUrl == styleUrl && holder.locationRequested == showLocation) {
+            if (holder.styleUrl == styleKey && holder.locationRequested == showLocation) {
                 if (holder.locationOn) locationMap = map
                 return@getMapAsync
             }
-            holder.styleUrl = styleUrl
+            holder.styleUrl = styleKey
             holder.locationRequested = showLocation
             holder.locationOn = false
             locationMap = null
             map.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
+                applyLook(style, look)
                 if (showLocation && enableLocation(context, map, style)) {
                     holder.locationOn = true
                     locationMap = map
                 }
                 // Stil değişince katmanlar silinir; rota varsa yeniden çiz.
-                drawRoute(style, PanoNav.state.value?.route)
+                drawRoute(style, PanoNav.state.value?.route, Settings.state.value.routeColor)
                 holder.cameraPhase = null
             }
         }
@@ -264,10 +274,10 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
     val nav by PanoNav.state.collectAsState()
     val route = nav?.route
     val phase = nav?.phase
-    LaunchedEffect(route, phase, locationMap) {
+    LaunchedEffect(route, phase, locationMap, routeColor) {
         mapView.getMapAsync { map ->
             val style = map.style?.takeIf { it.isFullyLoaded } ?: return@getMapAsync
-            drawRoute(style, route)
+            drawRoute(style, route, routeColor)
             applyNavCamera(holder, map, mapView, route, phase, bottomInset)
         }
     }
@@ -294,7 +304,7 @@ private const val ROUTE_LINE = "pano-route-line"
 private const val LOCATION_BOTTOM_LAYER = "mapbox-location-shadow-layer"
 
 /** Rotayı haritaya çizer; [route] null ise siler. */
-private fun drawRoute(style: Style, route: Route?) {
+private fun drawRoute(style: Style, route: Route?, color: RouteColor) {
     if (route == null) {
         style.removeLayer(ROUTE_LINE)
         style.removeLayer(ROUTE_CASING)
@@ -305,17 +315,19 @@ private fun drawRoute(style: Style, route: Route?) {
     val source = style.getSourceAs<GeoJsonSource>(ROUTE_SOURCE)
     if (source != null) {
         source.setGeoJson(line)
+        style.getLayer(ROUTE_CASING)?.setProperties(PropertyFactory.lineColor(color.casing))
+        style.getLayer(ROUTE_LINE)?.setProperties(PropertyFactory.lineColor(color.line))
         return
     }
     style.addSource(GeoJsonSource(ROUTE_SOURCE, line))
     val casing = LineLayer(ROUTE_CASING, ROUTE_SOURCE).withProperties(
-        PropertyFactory.lineColor("#0B3D91"),
+        PropertyFactory.lineColor(color.casing),
         PropertyFactory.lineWidth(12f),
         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
     )
     val top = LineLayer(ROUTE_LINE, ROUTE_SOURCE).withProperties(
-        PropertyFactory.lineColor("#2F8CFF"),
+        PropertyFactory.lineColor(color.line),
         PropertyFactory.lineWidth(7f),
         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
@@ -327,6 +339,83 @@ private fun drawRoute(style: Style, route: Route?) {
         style.addLayer(casing)
         style.addLayer(top)
     }
+}
+
+/** Haritanın okunabilirlik ayarları (Ayarlar > Harita). */
+private data class MapLook(val dark: Boolean, val highContrast: Boolean, val textScale: Float)
+
+/** Rota dışındaki yol katmanları değil (raylar, iskeleler, düşük yakınlıktaki silik yollar). */
+private fun isRoadLayer(id: String) =
+    listOf("rail", "pier", "ferry", "aeroway", "subtle", "area").none { id.contains(it) }
+
+private fun c(hex: String) = Expression.color(android.graphics.Color.parseColor(hex))
+
+/**
+ * Yüklenen stile okunabilirlik ayarlarını uygular. OpenFreeMap'in gece stili yolları neredeyse
+ * arka planla aynı tonda çiziyor; yüksek kontrastta yollar sınıfına göre belirgin renk alır,
+ * yazılar zıt renkli kalın kenarlıkla çizilir. Bir katman beklenmedik biçimdeyse olduğu gibi bırakılır.
+ */
+private fun applyLook(style: Style, look: MapLook) {
+    if (!look.highContrast && look.textScale == 1f) return
+    val d = look.dark
+    for (layer in style.layers) runCatching {
+        when (layer) {
+            is LineLayer -> if (look.highContrast && layer.sourceLayer == "transportation" && isRoadLayer(layer.id)) {
+                if (layer.id.contains("casing")) {
+                    layer.setProperties(PropertyFactory.lineColor(if (d) "#3A3F47" else "#7D838C"), PropertyFactory.lineOpacity(1f))
+                } else {
+                    layer.setProperties(
+                        PropertyFactory.lineColor(
+                            Expression.match(
+                                Expression.get("class"),
+                                c(if (d) "#9AA0A8" else "#B9BEC6"),
+                                Expression.stop("motorway", c(if (d) "#F0A23A" else "#E5821A")),
+                                Expression.stop("trunk", c(if (d) "#E6CF78" else "#F2BE22")),
+                                Expression.stop("primary", c(if (d) "#E6CF78" else "#F2BE22")),
+                                Expression.stop("secondary", c(if (d) "#D2D6DC" else "#FFE68A")),
+                                Expression.stop("tertiary", c(if (d) "#D2D6DC" else "#FFE68A")),
+                                Expression.stop("path", c(if (d) "#6B7079" else "#C9CDD3")),
+                            ),
+                        ),
+                        PropertyFactory.lineOpacity(1f),
+                    )
+                }
+            }
+            is SymbolLayer -> {
+                if (look.textScale != 1f) scaleTextSize(layer, look.textScale)
+                if (look.highContrast && !layer.id.contains("shield") && !layer.id.contains("way")) {
+                    layer.setProperties(
+                        PropertyFactory.textColor(if (d) "#F2F2F7" else "#111114"),
+                        PropertyFactory.textHaloColor(if (d) "#000000" else "#FFFFFF"),
+                        PropertyFactory.textHaloWidth(2f),
+                        PropertyFactory.textHaloBlur(0f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Yazı boyutunu büyütür. Boyut çoğunlukla yakınlığa göre değişen bir ifade; yakınlık ifadesi
+ * başka bir ifadenin içine konamadığı için çarpım yerine ifadedeki çıktı sayıları büyütülür.
+ */
+private fun scaleTextSize(layer: SymbolLayer, scale: Float) {
+    val size = layer.textSize
+    if (!size.isExpression) {
+        layer.setProperties(PropertyFactory.textSize((size.value ?: 16f) * scale))
+        return
+    }
+    val json = com.google.gson.JsonParser.parseString(size.expression.toString()).asJsonArray
+    val op = json[0].asString
+    val firstOutput = when (op) { "interpolate" -> 4; "step" -> 2; else -> return }
+    var i = firstOutput
+    while (i < json.size()) {
+        val v = json[i]
+        if (v.isJsonPrimitive && v.asJsonPrimitive.isNumber) json.set(i, com.google.gson.JsonPrimitive(v.asFloat * scale))
+        i += 2 // [.., girdi, çıktı, girdi, çıktı ..]
+    }
+    layer.setProperties(PropertyFactory.textSize(Expression.raw(json.toString())))
 }
 
 /**

@@ -29,6 +29,30 @@ enum class MapStyle(val label: String, val dayUrl: String) {
     Bright("Parlak", "https://tiles.openfreemap.org/styles/bright"),
 }
 
+/** Gece haritası. Koyu çok karanlık; Lacivert daha açık tonlu, yollar daha kolay seçiliyor. */
+enum class MapNightStyle(val label: String, val url: String) {
+    Dark("Koyu", "https://tiles.openfreemap.org/styles/dark"),
+    Fiord("Lacivert", "https://tiles.openfreemap.org/styles/fiord"),
+}
+
+/** Yüksek kontrast: yollar sınıfına göre belirgin renklerle, yazılar kalın kenarlıkla çizilir. */
+enum class MapContrast(val label: String) { Normal("Normal"), High("Yüksek") }
+
+/** Harita yazılarının (sokak, yer adları) boyut çarpanı. */
+enum class MapTextSize(val label: String, val scale: Float) {
+    Normal("Normal", 1f),
+    Large("Büyük", 1.25f),
+    Huge("Çok büyük", 1.5f),
+}
+
+/** Pano navigasyonunda rota çizgisinin rengi: dış kenar ve iç çizgi. */
+enum class RouteColor(val label: String, val casing: String, val line: String) {
+    Blue("Mavi", "#0B3D91", "#2F8CFF"),
+    Orange("Turuncu", "#8A3A00", "#FF8A00"),
+    Green("Yeşil", "#0B5A2A", "#2FD36B"),
+    Purple("Mor", "#4A1670", "#C060FF"),
+}
+
 /** Ana ekran düzeni: klasik Pano kartları ya da iOS / CarPlay havasında cam arayüz. */
 enum class LayoutStyle(val label: String) { Pano("Klasik"), CarPlay("CarPlay") }
 
@@ -55,6 +79,10 @@ data class StyleSettings(
     val accent: AccentChoice = AccentChoice.Mono,
     val font: FontChoice = FontChoice.Inter,
     val map: MapStyle = MapStyle.Clean,
+    val mapNight: MapNightStyle = MapNightStyle.Dark,
+    val mapContrast: MapContrast = MapContrast.Normal,
+    val mapText: MapTextSize = MapTextSize.Normal,
+    val routeColor: RouteColor = RouteColor.Blue,
 )
 
 val LocalStyle = compositionLocalOf { StyleSettings() }
@@ -86,6 +114,10 @@ object Settings {
             accent = enumOr(p.getString("accent", null), d.accent),
             font = enumOr(p.getString("font", null), d.font),
             map = enumOr(p.getString("map", null), d.map),
+            mapNight = enumOr(p.getString("mapNight", null), d.mapNight),
+            mapContrast = enumOr(p.getString("mapContrast", null), d.mapContrast),
+            mapText = enumOr(p.getString("mapText", null), d.mapText),
+            routeColor = enumOr(p.getString("routeColor", null), d.routeColor),
         )
     }
 
@@ -104,6 +136,10 @@ object Settings {
             ?.putString("accent", s.accent.name)
             ?.putString("font", s.font.name)
             ?.putString("map", s.map.name)
+            ?.putString("mapNight", s.mapNight.name)
+            ?.putString("mapContrast", s.mapContrast.name)
+            ?.putString("mapText", s.mapText.name)
+            ?.putString("routeColor", s.routeColor.name)
             ?.apply()
     }
 
