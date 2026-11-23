@@ -179,6 +179,10 @@ class MapHolder internal constructor(val view: MapView) {
     internal var lastEndInset = 0f
     /** Kullanıcı haritayı elle kaydırdı ya da yakınlaştırdı: kamera aracı izlemiyor. */
     internal val freeCamera = mutableStateOf(false)
+    /** Haritada uzun basılan nokta (yalnızca jestler açıkken). */
+    internal val pressed = mutableStateOf<LatLng?>(null)
+    /** Kamera her kıpırdadığında artar; uzun basılan noktanın iğnesi yerini buna göre günceller. */
+    internal val cameraTick = androidx.compose.runtime.mutableIntStateOf(0)
 }
 
 /**
@@ -204,6 +208,33 @@ class MapControls internal constructor(private val holder: MapHolder) {
     }
 
     fun recenter() = recenterMap(holder)
+
+    /**
+     * Araç izlenirken yakınlığı değiştirir (hıza göre otomatik yakınlık için). Harita elle
+     * oynatıldıysa ya da izleme yoksa bir şey yapmaz.
+     */
+    fun setTrackingZoom(zoom: Double) {
+        val map = holder.map ?: return
+        if (holder.freeCamera.value || !holder.locationOn) return
+        val location = map.locationComponent
+        if (location.cameraMode == CameraMode.NONE) return
+        if (kotlin.math.abs(map.cameraPosition.zoom - zoom) < 0.2) return
+        location.zoomWhileTracking(zoom, 1_500)
+    }
+
+    /** Uzun basılan nokta; yoksa null. */
+    val pressed: LatLng? get() = holder.pressed.value
+
+    fun clearPressed() { holder.pressed.value = null }
+
+    /**
+     * [point]'in harita görünümündeki yeri (piksel). Okurken kamera sayacını da okur; böylece
+     * harita kayınca çağıran yeniden çizilir.
+     */
+    fun screenPosition(point: LatLng): android.graphics.PointF? {
+        holder.cameraTick.intValue
+        return holder.map?.projection?.toScreenLocation(point)
+    }
 }
 
 @Composable
@@ -309,7 +340,16 @@ internal fun LiveMap(
                         if (holder.locationOn) map.locationComponent.cameraMode = CameraMode.NONE
                     }
                 }
+                // Uzun basınca seçilen nokta (Ufuk: "Buraya git").
+                map.addOnMapLongClickListener { point ->
+                    if (!holder.interactive) return@addOnMapLongClickListener false
+                    holder.pressed.value = point
+                    true
+                }
+                // İğne varken kamera hareketini Compose'a bildir; yoksa boşuna yeniden çizim olmasın.
+                map.addOnCameraMoveListener { if (holder.pressed.value != null) holder.cameraTick.intValue++ }
             }
+            if (!interactive) holder.pressed.value = null
             // Elle oynatılmış harita, jestsiz bir düzene geçilince kendiliğinden ortalanır.
             if (!interactive && holder.freeCamera.value) mapView.post { recenterMap(holder) }
             if (map.cameraPosition.zoom < 3) {

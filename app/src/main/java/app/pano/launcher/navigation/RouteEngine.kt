@@ -68,6 +68,20 @@ object RouteEngine {
         }.onFailure { Log.w(TAG, "arama: $it") }.getOrDefault(emptyList())
     }
 
+    /**
+     * Haritada seçilen noktanın adı (Photon ters arama). Ad bulunamazsa ya da ağ yoksa null;
+     * çağıran o zaman koordinatı gösterir.
+     */
+    suspend fun reverse(lat: Double, lon: Double): Place? = withContext(Dispatchers.IO) {
+        runCatching {
+            val json = JSONObject(get("https://photon.komoot.io/reverse?lat=$lat&lon=$lon&limit=1"))
+            val features = json.getJSONArray("features")
+            // Rota kartta adı yazan yere gider (Photon'un koordinatı). Basılan noktayı kullanmak
+            // suya ya da yolsuz alana basınca anlamsız rotalar üretiyordu (Boğaz'dan Bursa'ya dolaşma).
+            if (features.length() == 0) null else parsePlace(features.getJSONObject(0))
+        }.onFailure { Log.w(TAG, "ters arama: $it") }.getOrNull()
+    }
+
     private fun parsePlace(f: JSONObject): Place? {
         val p = f.getJSONObject("properties")
         val c = f.getJSONObject("geometry").getJSONArray("coordinates")
@@ -86,8 +100,13 @@ object RouteEngine {
         val start = JSONObject().put("lat", fromLat).put("lon", fromLon)
         // Gidiş yönünü bildirmek, rotanın arkaya dönerek başlamasını önler.
         if (heading != null) start.put("heading", heading.toInt()).put("heading_tolerance", 60)
+        // Uç noktalar feribot hattına bağlanmasın: iskele / sahil hedefleri (ör. Kabataş İskelesi)
+        // yoksa Yalova feribotuna bağlanıp 1 km'lik yolu 244 km'lik rotaya çeviriyordu.
+        val noFerry = JSONObject().put("exclude_ferry", true)
+        start.put("search_filter", noFerry)
+        val end = JSONObject().put("lat", to.lat).put("lon", to.lon).put("search_filter", noFerry)
         val body = JSONObject()
-            .put("locations", JSONArray().put(start).put(JSONObject().put("lat", to.lat).put("lon", to.lon)))
+            .put("locations", JSONArray().put(start).put(end))
             .put("costing", "auto")
             .put("directions_options", JSONObject().put("language", "tr-TR").put("units", "kilometers"))
         val trip = JSONObject(post(VALHALLA, body.toString())).getJSONObject("trip")
