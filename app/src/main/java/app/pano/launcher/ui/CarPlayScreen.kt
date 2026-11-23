@@ -74,6 +74,9 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layoutId
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -82,15 +85,21 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
 import app.pano.launcher.settings.DockStore
 import app.pano.launcher.settings.LocalStyle
+import app.pano.launcher.navigation.Lane
+import app.pano.launcher.navigation.LaneTurn
 import app.pano.launcher.navigation.NavPhase
 import app.pano.launcher.navigation.NavSession
 import app.pano.launcher.navigation.PanoNav
 import app.pano.launcher.navigation.RouteEngine
+import app.pano.launcher.navigation.ChargerSearch
+import app.pano.launcher.navigation.SavedPlaces
+import app.pano.launcher.navigation.Shortcut
 import app.pano.launcher.navigation.formatDistance
 import app.pano.launcher.navigation.formatDuration
 import androidx.compose.foundation.layout.heightIn
@@ -922,6 +931,7 @@ private fun MapWidget(modifier: Modifier) {
                 title = if (arrived) "Vardınız: ${session.destination.name}" else m.instruction,
                 eta = if (session.rerouting) "Rota yeniden hesaplanıyor…" else null,
                 vector = if (arrived) PanoIcons.Flag else maneuverIcon(m.type),
+                lanes = if (arrived) null else p?.lanes,
                 modifier = Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth(),
             ) { AppSheet.openNav() }
             NavBottomBar(session, Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 40.dp).fillMaxWidth())
@@ -971,13 +981,15 @@ private fun MapWidget(modifier: Modifier) {
 }
 
 @Composable
-private fun ManeuverCard(
+internal fun ManeuverCard(
     distance: String?,
     title: String,
     eta: String?,
     modifier: Modifier,
     bitmap: android.graphics.Bitmap? = null,
     vector: ImageVector? = null,
+    /** Yaklaşılan kavşağın şeritleri; null ya da boşsa hiçbir şey çizilmez. */
+    lanes: List<Lane>? = null,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(26.dp)
@@ -1009,11 +1021,63 @@ private fun ManeuverCard(
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp),
             )
         }
+        if (!lanes.isNullOrEmpty()) LaneStrip(lanes, Modifier.padding(top = 12.dp))
+    }
+}
+
+/** Şerit okları: kullanılacak şeritler beyaz, diğerleri soluk; aralarında ince ayraç. */
+@Composable
+private fun LaneStrip(lanes: List<Lane>, modifier: Modifier) {
+    Row(
+        modifier.clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.2f))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        lanes.forEachIndexed { i, lane ->
+            if (i > 0) Box(Modifier.width(1.dp).height(28.dp).background(Color.White.copy(alpha = 0.25f)))
+            Icon(
+                laneIcon(lane.turn), contentDescription = null,
+                tint = if (lane.active) Color.White else Color.White.copy(alpha = 0.3f),
+                modifier = Modifier.padding(horizontal = 6.dp).size(34.dp),
+            )
+        }
+    }
+}
+
+private fun laneIcon(turn: LaneTurn): ImageVector = when (turn) {
+    LaneTurn.Straight -> PanoIcons.Straight
+    LaneTurn.SlightRight -> PanoIcons.SlightRight
+    LaneTurn.Right, LaneTurn.SharpRight -> PanoIcons.TurnRight
+    LaneTurn.SlightLeft -> PanoIcons.SlightLeft
+    LaneTurn.Left, LaneTurn.SharpLeft -> PanoIcons.TurnLeft
+    LaneTurn.UTurn -> PanoIcons.UTurn
+}
+
+/** Yönlendirme sürerken aracın bulunduğu kesimin hız sınırı (km/sa); bilinmiyorsa null. */
+@Composable
+internal fun navSpeedLimit(): Int? {
+    val s by PanoNav.state.collectAsState()
+    return s?.takeIf { it.phase == NavPhase.Active }?.progress?.speedLimitKmh
+}
+
+/** Hız sınırı levhası: beyaz zemin, kırmızı kenar, siyah sayı. */
+@Composable
+internal fun SpeedLimitSign(kmh: Int, size: Dp, modifier: Modifier = Modifier) {
+    Box(
+        modifier.size(size).clip(CircleShape).background(Color.White)
+            .border(size * 0.11f, Color(0xFFE0262B), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            kmh.toString(), color = Color.Black, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp,
+            fontSize = with(LocalDensity.current) { (size * if (kmh >= 100) 0.34f else 0.42f).toSp() },
+            lineHeight = with(LocalDensity.current) { (size * 0.5f).toSp() },
+        )
     }
 }
 
 /** Valhalla manevra türüne göre ok. */
-private fun maneuverIcon(type: Int): ImageVector = when (type) {
+internal fun maneuverIcon(type: Int): ImageVector = when (type) {
     4, 5, 6 -> PanoIcons.Flag
     9, 18, 20, 23, 37 -> PanoIcons.SlightRight
     10, 11 -> PanoIcons.TurnRight
@@ -1030,7 +1094,7 @@ private fun arrivalClock(remainingS: Double): String =
 
 /** Yönlendirme sırasında haritanın altında: varış saati, kalan süre/mesafe ve "Bitir". */
 @Composable
-private fun NavBottomBar(session: NavSession, modifier: Modifier) {
+internal fun NavBottomBar(session: NavSession, modifier: Modifier) {
     val c = glass()
     val route = session.route ?: return
     val remainingS = session.progress?.remainingS ?: route.timeS
@@ -1057,23 +1121,32 @@ private fun NavBottomBar(session: NavSession, modifier: Modifier) {
 }
 
 /**
- * Sağ ekrandaki "Nereye?": üstte arama kutusu; yazarken sonuçlar, boşken son gidilenler.
- * Bir yer seçilince rota önizlemesi (süre, mesafe, varış) ve "Başlat". Yönlendirme sürerken
- * hedef özeti, sıradaki manevralar ve "Navigasyonu bitir".
+ * Sağ ekrandaki "Nereye?": üstte arama kutusu, altında Ev / İş / Şarj kısayolları; yazarken sonuçlar,
+ * boşken son gidilenler. Bir yer seçilince rota önizlemesi (süre, mesafe, varış) ve "Başlat".
+ * Yönlendirme sürerken hedef özeti, sıradaki manevralar ve "Navigasyonu bitir".
  */
 @Composable
-private fun NavScreen(modifier: Modifier, onClose: () -> Unit) {
+internal fun NavScreen(modifier: Modifier, onClose: () -> Unit) {
     val c = glass()
     val context = LocalContext.current
-    LaunchedEffect(Unit) { PanoNav.init(context) }
+    LaunchedEffect(Unit) { PanoNav.init(context); SavedPlaces.init(context) }
     val session by PanoNav.state.collectAsState()
     val recents by PanoNav.recents.collectAsState()
+    val saved by SavedPlaces.places.collectAsState()
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<app.pano.launcher.navigation.Place>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     // Önizleme ya da yönlendirme varken arama kutusuna yazılırsa yeniden arama moduna geçilir.
     var forceSearch by remember { mutableStateOf(false) }
     val here = remember { PanoNav.bestLastKnown(context) ?: PanoNav.lastLocation }
+    // Seçilen yer bu kısayola kaydedilecek ("Ev ekle" / "Değiştir").
+    var pickFor by remember { mutableStateOf<Shortcut?>(null) }
+    // Uzun basılan kısayol: "Değiştir / Kaldır" gösterilir.
+    var menuFor by remember { mutableStateOf<Shortcut?>(null) }
+    // Şarj istasyonu listesi: chargers null = yükleniyor.
+    var charging by remember { mutableStateOf(false) }
+    var chargers by remember { mutableStateOf<List<app.pano.launcher.navigation.Place>?>(null) }
+    var chargeError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(query) {
         if (query.trim().length < 2) { results = emptyList(); searching = false; return@LaunchedEffect }
@@ -1083,35 +1156,148 @@ private fun NavScreen(modifier: Modifier, onClose: () -> Unit) {
         searching = false
     }
 
+    LaunchedEffect(charging) {
+        if (!charging) return@LaunchedEffect
+        chargers = null
+        chargeError = null
+        val loc = PanoNav.bestLastKnown(context) ?: PanoNav.lastLocation ?: here
+        if (loc == null) {
+            chargeError = "Konum bilinmiyor; yakındaki istasyonlar aranamadı"
+            chargers = emptyList()
+            return@LaunchedEffect
+        }
+        val found = ChargerSearch.near(loc.latitude, loc.longitude)
+        if (found == null) chargeError = "Şarj istasyonları alınamadı; bağlantıyı kontrol et"
+        chargers = found ?: emptyList()
+    }
+
+    fun choose(place: app.pano.launcher.navigation.Place) {
+        val target = pickFor
+        query = ""
+        if (target != null) {
+            SavedPlaces.set(target, place)
+            pickFor = null
+            return
+        }
+        charging = false
+        forceSearch = false
+        PanoNav.preview(context, place)
+    }
+
     val s = session
     Column(modifier) {
-        if (s == null || forceSearch || query.isNotEmpty()) {
-            SearchField(query, onChange = { query = it; forceSearch = true }, autoFocus = s == null)
-            val list = if (query.trim().length >= 2) results else recents
+        if (s == null || forceSearch || query.isNotEmpty() || pickFor != null) {
+            SearchField(
+                query,
+                onChange = { query = it; forceSearch = true; menuFor = null; if (pickFor == null) charging = false },
+                autoFocus = s == null || pickFor != null,
+            )
+            val typing = query.trim().length >= 2
+            val pick = pickFor
+            val showChargers = charging && pick == null && !typing
+            when {
+                pick != null -> ModeBar("${pick.label} olarak kaydedilecek yeri seç") { pickFor = null; query = "" }
+                showChargers -> ModeBar("Yakındaki şarj istasyonları") { charging = false }
+                !typing -> {
+                    val menu = menuFor
+                    Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (menu != null) {
+                            NavButton("${menu.label}: Değiştir", c.chip, c.text, Modifier.weight(1f)) { menuFor = null; pickFor = menu }
+                            NavButton("Kaldır", Color(0xFFFF453A), Color.White) { SavedPlaces.remove(menu); menuFor = null }
+                            NavButton("Vazgeç", c.chip, c.text) { menuFor = null }
+                        } else {
+                            Shortcut.entries.forEach { sc ->
+                                val place = saved[sc]
+                                ShortcutButton(
+                                    icon = if (sc == Shortcut.Home) PanoIcons.Home else PanoIcons.Work,
+                                    title = if (place != null) sc.label else "${sc.label} ekle",
+                                    subtitle = place?.name,
+                                    modifier = Modifier.weight(1f),
+                                    onLongClick = if (place != null) ({ menuFor = sc }) else null,
+                                ) {
+                                    if (place != null) choose(place) else { pickFor = sc; query = "" }
+                                }
+                            }
+                            ShortcutButton(PanoIcons.Bolt, "Şarj", "Yakındakiler", Modifier.weight(1f), onLongClick = null) { charging = true }
+                        }
+                    }
+                }
+            }
+            val list = when {
+                typing -> results
+                showChargers -> chargers ?: emptyList()
+                else -> recents
+            }
             Text(
                 when {
-                    query.trim().length >= 2 && searching -> "Aranıyor…"
-                    query.trim().length >= 2 && results.isEmpty() -> "Sonuç bulunamadı"
-                    query.trim().length >= 2 -> "Sonuçlar"
+                    typing && searching -> "Aranıyor…"
+                    typing && results.isEmpty() -> "Sonuç bulunamadı"
+                    typing -> "Sonuçlar"
+                    showChargers && chargers == null -> "Aranıyor…"
+                    showChargers && chargeError != null -> chargeError ?: ""
+                    showChargers && list.isEmpty() -> "Yakında şarj istasyonu bulunamadı"
+                    showChargers -> "En yakından uzağa · OpenStreetMap verisi"
                     recents.isEmpty() -> "Adres, yer ya da işletme adı yaz"
                     else -> "Son gidilenler"
                 },
                 color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
                 modifier = Modifier.padding(start = 8.dp, top = 18.dp, bottom = 6.dp),
             )
+            val icon = when {
+                typing -> PanoIcons.Pin
+                showChargers -> PanoIcons.Bolt
+                else -> PanoIcons.Clock
+            }
             androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                 items(list.size) { i ->
                     val place = list[i]
-                    PlaceRow(place, here, recent = query.trim().length < 2) {
-                        query = ""
-                        forceSearch = false
-                        PanoNav.preview(context, place)
-                    }
+                    PlaceRow(place, here, icon) { choose(place) }
                 }
             }
         } else {
             RouteSummary(s, onSearch = { forceSearch = true }, onStarted = onClose)
         }
+    }
+}
+
+/** Kısayol / kategori düğmesi: büyük, ikonlu; kayıtlıysa altında yerin adı. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ShortcutButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String?,
+    modifier: Modifier,
+    onLongClick: (() -> Unit)?,
+    onClick: () -> Unit,
+) {
+    val c = glass()
+    Row(
+        modifier.pressScale().height(80.dp).clip(RoundedCornerShape(24.dp)).background(c.chip)
+            .combinedClickable(role = Role.Button, onLongClick = onLongClick, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = linkColor(), modifier = Modifier.size(28.dp))
+        Column(Modifier.padding(start = 12.dp)) {
+            Text(title, color = c.text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (subtitle != null) {
+                Text(subtitle, color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** Arama kutusunun altında süren modu (kısayol kaydetme, şarj listesi) ve çıkış düğmesini gösterir. */
+@Composable
+private fun ModeBar(text: String, onCancel: () -> Unit) {
+    val c = glass()
+    Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text, color = c.text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(start = 8.dp),
+        )
+        NavButton("Vazgeç", c.chip, c.text, onClick = onCancel)
     }
 }
 
@@ -1144,7 +1330,7 @@ private fun SearchField(query: String, onChange: (String) -> Unit, autoFocus: Bo
 }
 
 @Composable
-private fun PlaceRow(place: app.pano.launcher.navigation.Place, here: android.location.Location?, recent: Boolean, onClick: () -> Unit) {
+private fun PlaceRow(place: app.pano.launcher.navigation.Place, here: android.location.Location?, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
     val c = glass()
     Row(
         Modifier.fillMaxWidth().heightIn(min = 76.dp).clip(RoundedCornerShape(20.dp)).clickable(role = Role.Button, onClick = onClick)
@@ -1152,7 +1338,7 @@ private fun PlaceRow(place: app.pano.launcher.navigation.Place, here: android.lo
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(48.dp).clip(CircleShape).background(c.chip), contentAlignment = Alignment.Center) {
-            Icon(if (recent) PanoIcons.Clock else PanoIcons.Pin, contentDescription = null, tint = c.text, modifier = Modifier.size(24.dp))
+            Icon(icon, contentDescription = null, tint = c.text, modifier = Modifier.size(24.dp))
         }
         Column(Modifier.weight(1f).padding(start = 16.dp)) {
             Text(place.name, color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1270,8 +1456,12 @@ private fun VehicleWidget(modifier: Modifier) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     // Hız yoksa (BYD veri yolu da GPS de yok) "—": uydurma 0 gösterilmez.
-                    Text(v.speedKmh?.toString() ?: "—", color = c.text, fontSize = 80.sp, fontWeight = FontWeight.Light, letterSpacing = (-3).sp, lineHeight = 80.sp)
+                    // Pano'nun yönlendirmesi hız sınırını biliyorsa levha; sınır aşılınca hız kırmızı.
+                    val limit = navSpeedLimit()
+                    val over = limit != null && (v.speedKmh ?: 0) > limit
+                    Text(v.speedKmh?.toString() ?: "—", color = if (over) Color(0xFFFF453A) else c.text, fontSize = 80.sp, fontWeight = FontWeight.Light, letterSpacing = (-3).sp, lineHeight = 80.sp)
                     Text("km/s", color = c.secondary, fontSize = 20.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp, bottom = 12.dp))
+                    if (limit != null) SpeedLimitSign(limit, 60.dp, Modifier.padding(start = 14.dp, bottom = 10.dp))
                 }
                 Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     val status = when {
@@ -1692,7 +1882,7 @@ private fun duration(ms: Long): String {
  * Kapağa dokununca kaynak uygulama tam ekran açılır.
  */
 @Composable
-private fun NowPlayingScreen(modifier: Modifier) {
+internal fun NowPlayingScreen(modifier: Modifier) {
     val c = glass()
     val context = LocalContext.current
     val playing by MediaHub.state.collectAsState()
@@ -1853,25 +2043,57 @@ private fun ClimateStrip(climate: ClimateState, onNavigate: (Screen) -> Unit, mo
     DockStore.load(context)
     val selected by DockStore.state
 
-    BoxWithConstraints(
-        modifier.glass(c, RoundedCornerShape(30.dp)).longPressAnywhere { DockEditing.open = true },
-        contentAlignment = Alignment.Center,
-    ) {
-        val minWidth = maxWidth
-        // Çok kontrol seçilirse şerit yana kaydırılır; azsa ortalanır.
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
-            Row(
-                Modifier.widthIn(min = minWidth).padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-            ) {
-                DockControl.entries.filter { it in selected }.forEach { control ->
-                    DockItemView(control, climate, onNavigate)
-                }
+    val controls = DockControl.entries.filter { it in selected }
+    // Öğeler ortalanır, aralarında 12 dp boşluk olur. Sığmazsa önce boşluk 6 dp'ye iner, yine
+    // sığmazsa en az önemli öğeler ([DockHideOrder]) tek tek gizlenir; şerit kaydırılmaz.
+    Layout(
+        content = {
+            controls.forEach { control ->
+                Box(Modifier.layoutId(control)) { DockItemView(control, climate, onNavigate) }
+            }
+        },
+        modifier = modifier.glass(c, RoundedCornerShape(30.dp))
+            .longPressAnywhere { DockEditing.open = true }
+            .padding(horizontal = 16.dp),
+    ) { measurables, constraints ->
+        val loose = Constraints(maxHeight = constraints.maxHeight)
+        // Çift bölge kapalıyken yolcu sürgüsü gibi boş kalan öğeler sayılmaz.
+        val items = measurables.map { (it.layoutId as DockControl) to it.measure(loose) }
+            .filter { it.second.width > 0 }
+            .toMutableList()
+        val gapMax = 12.dp.roundToPx()
+        val gapMin = 6.dp.roundToPx()
+        val available = constraints.maxWidth
+        fun widths() = items.sumOf { it.second.width }
+        fun gaps() = (items.size - 1).coerceAtLeast(0)
+        while (items.size > 1 && widths() + gapMin * gaps() > available) {
+            items.remove(items.minBy { dockHideRank(it.first) })
+        }
+        val gap = if (gaps() > 0) ((available - widths()) / gaps()).coerceIn(gapMin, gapMax) else 0
+        val total = widths() + gap * gaps()
+        val height = if (constraints.hasBoundedHeight) constraints.maxHeight else items.maxOfOrNull { it.second.height } ?: 0
+        layout(available, height) {
+            var x = ((available - total) / 2).coerceAtLeast(0)
+            items.forEach { (_, p) ->
+                p.placeRelative(x, (height - p.height) / 2)
+                x += p.width + gap
             }
         }
     }
 }
+
+/** Şerit sığmadığında gizlenme sırası: baştakiler önce gider. Listede olmayanlar en son gizlenir. */
+private val DockHideOrder = listOf(
+    DockControl.Rotate, DockControl.CarSettings, DockControl.PanoSettings, DockControl.Recents,
+    DockControl.Split, DockControl.Voice, DockControl.Phone, DockControl.ClimateDetail,
+    DockControl.RearDefrost, DockControl.Recirculation, DockControl.Power, DockControl.Defrost,
+    DockControl.Apps, DockControl.Music, DockControl.Navigation, DockControl.PanoAssistant,
+    DockControl.Auto, DockControl.AC, DockControl.PassengerTemperature, DockControl.Fan,
+    DockControl.Back, DockControl.Home, DockControl.Temperature,
+)
+
+private fun dockHideRank(control: DockControl): Int =
+    DockHideOrder.indexOf(control).let { if (it < 0) Int.MAX_VALUE else it }
 
 @Composable
 private fun DockItemView(control: DockControl, climate: ClimateState, onNavigate: (Screen) -> Unit) {
