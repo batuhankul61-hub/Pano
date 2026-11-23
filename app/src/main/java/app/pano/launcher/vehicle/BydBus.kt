@@ -281,10 +281,9 @@ internal object BydSignals {
 
     /**
      * Kapı, bagaj, kaput, cam ve sunroof durumu. `BYDAutoBodyworkDevice.getDoorState` /
-     * `getWindowOpenPercent` / `getWindowState` aynı kimlikleri okuyor:
-     * kapılarda `BODYWORK_STATE_OPEN` = 1, `BODYWORK_STATE_CLOSED` = 0 (255 = tanımsız); cam
-     * yüzdelerinde 0–100 açıklık; cam durumlarında aşağıdaki [window] notuna bak.
-     * Sözlük: docs/byd-sinyal-sozlugu.md.
+     * `getWindowOpenPercent` / `getWindowState` aynı kimlikleri okuyor: kapılarda ve cam durum
+     * sinyallerinde `BODYWORK_STATE_OPEN` = 1, `BODYWORK_STATE_CLOSED` = 0 (255 = tanımsız);
+     * cam yüzdelerinde 0–100 açıklık.
      *
      * Araçta (BYD Atto 2, CanFD, Kasım 2026) canlı okumayla bakıldı: veri yolunda yalnızca sürücü
      * camı değer veriyor. Sağ ön / sağ arka 65535 (okuma yok), sol arka yüzde 255 dönüyor ve yolcu
@@ -306,11 +305,8 @@ internal object BydSignals {
             raw.append(name).append('=').append(percent).append('/').append(state).append(' ')
             return when {
                 percent != null && percent in 0..100 -> percent > 0
-                // Durum sinyalinin ölçeği kesin değil: firmware sabitleri WINDOW_OPEN_FULL = 1,
-                // WINDOW_CLOSE = 2, WINDOW_OPEN_HALF = 4; araçta kapalı sürücü camı ise 0 okundu
-                // (BODYWORK_STATE_CLOSED). İki ölçekle de tutarlı olanı kullanılır, gerisi bilinmiyor.
-                state == 1 || state == 4 -> true
-                state == 0 || state == 2 -> false
+                state == 1 -> true
+                state == 0 -> false
                 else -> null
             }
         }
