@@ -148,26 +148,6 @@ fun DockItem(
     }
 }
 
-/** Yuvarlak, ince kenarlı araç komutu + altında etiket (Kilit, Bagaj…). */
-@Composable
-fun VehicleAction(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val colors = LocalPano.current
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier
-                .size(72.dp)
-                .clip(CircleShape)
-                .background(colors.raised)
-                .clickable(role = Role.Button, onClick = onClick)
-                .semantics { contentDescription = label },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = null, tint = colors.text, modifier = Modifier.size(28.dp))
-        }
-        Text(label, color = colors.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 10.dp))
-    }
-}
-
 /** Yuvarlak ikon butonu (+ / − / geri). */
 @Composable
 fun RoundIconButton(

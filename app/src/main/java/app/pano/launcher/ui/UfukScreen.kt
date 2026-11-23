@@ -94,6 +94,8 @@ import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.ui.theme.PanoColors
 import app.pano.launcher.vehicle.ClimateState
 import app.pano.launcher.vehicle.Gear
+import app.pano.launcher.vehicle.Opening
+import app.pano.launcher.vehicle.Openings
 import app.pano.launcher.vehicle.VehicleHub
 import app.pano.launcher.vehicle.decimal
 import app.pano.launcher.vehicle.shortTemp
@@ -272,37 +274,14 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
             }
         }
 
-        // Araç kontrolleri çizimin hemen üstünde, ilgili yerin hizasında: bagaj arkada (solda),
-        // kilit ortada, şarj kapağı önde (sağda). Sürüşte gizlenir, çizim büyür.
+        // Kilit/bagaj/şarj düğmeleri araçta komut almadığı için kaldırıldı. Yerlerinde açıklık
+        // durumu için sabit yükseklikte bir satır var: uyarı gelip gidince araç çizimi kıpırdamaz.
         Spacer(Modifier.weight(0.25f))
-        val open = v.openings?.open.orEmpty()
-        AnimatedVisibility(!locked && !compact, enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs))) {
-            val notYet = { Launch.notConnectedYet(context) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                CarHotspot(PanoIcons.Trunk, if (v.openings?.trunk == true) "Bagaj açık" else "Bagaj", notYet, Modifier)
-                CarHotspot(
-                    if (v.locked == false) PanoIcons.Unlock else PanoIcons.Lock,
-                    when (v.locked) { true -> "Kilitli"; false -> "Açık"; null -> "Kilit" },
-                    { app.pano.launcher.vehicle.VehicleControls.toggleLock(context) }, Modifier,
-                )
-                CarHotspot(PanoIcons.Bolt, "Şarj", notYet, Modifier)
-            }
-        }
-        // Açık kapı uyarısı çizimin üstüne bindirilir; sütuna eklenseydi aracı aşağı iterdi.
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            CarIllustration(Modifier.fillMaxSize().padding(vertical = 4.dp), dark = c.isDark, background = Color.Transparent)
-            androidx.compose.animation.AnimatedVisibility(
-                open.isNotEmpty(), Modifier.align(Alignment.TopCenter),
-                enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs)),
-            ) {
-                Text(
-                    open.take(3).joinToString(" · ") { "${it.label} açık" }, color = Accent.Red, fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold, maxLines = 2,
-                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(c.glass)
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                )
-            }
-        }
+        OpeningsStatus(v.openings, compact)
+        CarIllustration(
+            Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp),
+            dark = c.isDark, background = Color.Transparent,
+        )
         // Müzik yalnızca bir şey çalıyorsa yer kaplar.
         NowPlayingStrip(compact)
     }
@@ -331,25 +310,62 @@ private fun BatteryReadout(percent: Int?, rangeKm: Int?, c: PanoColors) {
     }
 }
 
-/** Çizimin üstünde etiketli dokunma noktası (≥72 dp). */
+/**
+ * Araç çiziminin üstündeki durum satırı. Açık kalan her parça kendi renkli etiketinde
+ * (kapı/bagaj/kaput kırmızı, cam turuncu); hiçbiri açık değilse sakin bir "kapalı" satırı.
+ * Açıklıklar araçtan okunamıyorsa (önizleme) satır boş kalır, uydurma "kapalı" yazılmaz.
+ * Yükseklik sabit: içerik değişince araç çizimi yerinden oynamaz.
+ */
 @Composable
-private fun CarHotspot(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier) {
+private fun OpeningsStatus(openings: Openings?, compact: Boolean) {
     val c = LocalPano.current
+    val open = openings?.open.orEmpty()
+    val known = openings != null && !openings.isEmpty
+    // Dar sütunda iki etiket sığıyor, kalanı sayı olarak.
+    val shown = if (compact) 2 else 3
+    Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.CenterStart) {
+        AnimatedContent(
+            targetState = when { open.isNotEmpty() -> open; known -> emptyList(); else -> null },
+            transitionSpec = { fadeIn(tween(UfukMotionMs)) togetherWith fadeOut(tween(UfukMotionMs)) },
+            label = "açıklıklar",
+        ) { items ->
+            when {
+                items == null -> Spacer(Modifier.fillMaxWidth())
+                items.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(PanoIcons.Lock, contentDescription = null, tint = c.tertiary, modifier = Modifier.size(18.dp))
+                    Text(
+                        "Kapılar ve camlar kapalı", color = c.tertiary, fontSize = 17.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    items.take(shown).forEach { OpeningChip(it) }
+                    if (items.size > shown) {
+                        Text(
+                            "+${items.size - shown}", color = c.secondary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OpeningChip(item: Opening) {
+    val c = LocalPano.current
+    val tone = if (item.isMajor) Accent.Red else Color(0xFFFF9F0A)
     Row(
-        modifier.height(72.dp).clip(RoundedCornerShape(36.dp))
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = label }
-            .padding(horizontal = 6.dp),
+        Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(tone.copy(alpha = if (c.isDark) 0.18f else 0.12f))
+            .padding(start = 12.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.height(52.dp).clip(RoundedCornerShape(26.dp)).background(c.glass)
-                .border(1.dp, c.hairline, RoundedCornerShape(26.dp)).padding(start = 14.dp, end = 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, tint = c.text, modifier = Modifier.size(24.dp))
-            Text(label, color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp))
-        }
+        Box(Modifier.size(9.dp).clip(CircleShape).background(tone))
+        Text(
+            "${item.label} açık", color = c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            modifier = Modifier.padding(start = 8.dp),
+        )
     }
 }
 
