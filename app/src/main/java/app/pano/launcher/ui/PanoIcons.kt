@@ -33,6 +33,13 @@ object PanoIcons {
 
     val Home = line("home", "M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z")
 
+    /** Evrak çantası: "İş" kısayolu. */
+    val Work = line(
+        "work",
+        "M5 8h14a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 5 8z" +
+            "M9 8V6.5A1.5 1.5 0 0 1 10.5 5h3A1.5 1.5 0 0 1 15 6.5V8M3.5 13h17",
+    )
+
     /** Yandan araç: araç ayarları. */
     val Car = line(
         "car",
