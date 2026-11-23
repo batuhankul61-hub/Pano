@@ -2,6 +2,7 @@ package app.pano.launcher.navigation
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -27,6 +28,18 @@ data class RouteManeuver(
     val beginIndex: Int,
 )
 
+/** Rotanın [startM]..[endM] (rota başından metre) arasındaki kesiminde hız sınırı. */
+data class SpeedLimitSpan(val startM: Double, val endM: Double, val kmh: Int)
+
+/** Şerit oku yönü (OSRM "indications" değerleri). */
+enum class LaneTurn { Straight, SlightRight, Right, SharpRight, UTurn, SharpLeft, Left, SlightLeft }
+
+/** Tek şerit: gösterilecek yön ve bu rotada kullanılıp kullanılmayacağı. */
+data class Lane(val turn: LaneTurn, val active: Boolean)
+
+/** Rotanın [alongM] metresindeki kavşakta şeritler (soldan sağa). */
+data class LaneGroup(val alongM: Double, val lanes: List<Lane>)
+
 /** Hesaplanmış rota: çizgi noktaları (enlem, boylam), manevralar, toplam uzunluk ve süre. */
 class Route(
     val lats: DoubleArray,
@@ -35,6 +48,10 @@ class Route(
     val lengthM: Double,
     val timeS: Double,
     val destination: Place,
+    /** Bilinen hız sınırları, rota boyunca sıralı. Boş = bilinmiyor. */
+    val speedLimits: List<SpeedLimitSpan> = emptyList(),
+    /** Şerit bilgisi olan kavşaklar, rota boyunca sıralı. Boş = bilinmiyor. */
+    val laneGroups: List<LaneGroup> = emptyList(),
 ) {
     /** Her noktaya kadar rota boyunca birikmiş mesafe (m). */
     val cumulative: DoubleArray = DoubleArray(lats.size).also { c ->
@@ -54,6 +71,7 @@ object RouteEngine {
     private const val USER_AGENT = "Pano-launcher/1.0 (Android)"
     private const val PHOTON = "https://photon.komoot.io/api/"
     private const val VALHALLA = "https://valhalla1.openstreetmap.de/route"
+    private const val TRACE_ATTRIBUTES = "https://valhalla1.openstreetmap.de/trace_attributes"
 
     /** Yer arar; [nearLat]/[nearLon] verilirse yakındaki sonuçlar öne çıkar. Hata olursa boş liste. */
     suspend fun search(query: String, nearLat: Double?, nearLon: Double?): List<Place> = withContext(Dispatchers.IO) {
@@ -109,7 +127,30 @@ object RouteEngine {
             .put("locations", JSONArray().put(start).put(end))
             .put("costing", "auto")
             .put("directions_options", JSONObject().put("language", "tr-TR").put("units", "kilometers"))
-        val trip = JSONObject(post(VALHALLA, body.toString())).getJSONObject("trip")
+        // Valhalla'nın kendi biçimi şerit vermiyor; OSRM biçimindeki aynı istek kavşak şeritlerini veriyor.
+        // Ek bilgidir: başarısız olursa rota şeritsiz kalır.
+        val lanesJob = async {
+            runCatching { lanes(JSONObject(body.toString()).put("format", "osrm").toString()) }
+                .onFailure { Log.w(TAG, "şeritler: $it") }.getOrDefault(emptyList())
+        }
+        val base = baseRoute(body.toString(), to)
+        // Hız sınırı rota yanıtında yok; rota çizgisi trace_attributes ile yollara eşlenip okunur.
+        val limits = runCatching { speedLimits(base.shape) }
+            .onFailure { Log.w(TAG, "hız sınırı: $it") }.getOrDefault(emptyList())
+        val laneGroups = lanesJob.await()
+        Log.i(
+            TAG,
+            "rota ${base.route.lengthM.toInt()} m, ${base.route.maneuvers.size} manevra; hız sınırı ${limits.size} kesim " +
+                "(${limits.sumOf { it.endM - it.startM }.toInt()} m, ${limits.map { it.kmh }.distinct()}); " +
+                "şerit ${laneGroups.size} kavşak",
+        )
+        base.route.run { Route(lats, lons, maneuvers, lengthM, timeS, destination, limits, laneGroups) }
+    }
+
+    private class BaseRoute(val route: Route, val shape: String)
+
+    private fun baseRoute(body: String, to: Place): BaseRoute {
+        val trip = JSONObject(post(VALHALLA, body)).getJSONObject("trip")
         val leg = trip.getJSONArray("legs").getJSONObject(0)
         val (lats, lons) = decodePolyline6(leg.getString("shape"))
         val ms = leg.getJSONArray("maneuvers")
@@ -125,7 +166,86 @@ object RouteEngine {
             )
         }
         val summary = trip.getJSONObject("summary")
-        Route(lats, lons, maneuvers, summary.getDouble("length") * 1000, summary.getDouble("time"), to)
+        return BaseRoute(Route(lats, lons, maneuvers, summary.getDouble("length") * 1000, summary.getDouble("time"), to), leg.getString("shape"))
+    }
+
+    /**
+     * Rota çizgisini yollara eşleyip (edge_walk: çizgi zaten Valhalla'dan, birebir yol üstünde)
+     * her yol parçasının OSM hız sınırını okur. Sınırı olmayan parçalar atlanır (bilinmiyor).
+     */
+    private fun speedLimits(shape: String): List<SpeedLimitSpan> {
+        val body = JSONObject()
+            .put("encoded_polyline", shape)
+            .put("shape_match", "edge_walk")
+            .put("costing", "auto")
+            .put(
+                "filters",
+                JSONObject().put("action", "include").put(
+                    "attributes",
+                    JSONArray().put("edge.speed_limit").put("edge.begin_shape_index").put("edge.end_shape_index").put("shape"),
+                ),
+            )
+        val json = JSONObject(post(TRACE_ATTRIBUTES, body.toString()))
+        // Kesimler eşlenen çizgi üzerinde ölçülür; aynı yolu izlediği için rota uzunluğuyla örtüşür.
+        val (lats, lons) = decodePolyline6(json.getString("shape"))
+        val cum = cumulative(lats, lons)
+        val edges = json.getJSONArray("edges")
+        val out = ArrayList<SpeedLimitSpan>()
+        for (i in 0 until edges.length()) {
+            val e = edges.getJSONObject(i)
+            // Sayı değilse ("unlimited" gibi) ya da 0 ise bilinmiyor sayılır.
+            val kmh = (e.opt("speed_limit") as? Number)?.toInt()?.takeIf { it in 1..200 } ?: continue
+            val a = cum[e.optInt("begin_shape_index").coerceIn(0, cum.lastIndex)]
+            val b = cum[e.optInt("end_shape_index").coerceIn(0, cum.lastIndex)]
+            val last = out.lastOrNull()
+            // Aynı sınırlı bitişik parçaları birleştir.
+            if (last != null && last.kmh == kmh && a - last.endM < 1.0) out[out.lastIndex] = last.copy(endM = b)
+            else out += SpeedLimitSpan(a, b, kmh)
+        }
+        return out
+    }
+
+    /** OSRM biçimli rota yanıtındaki kavşak şeritleri; konumları rota başından metre olarak. */
+    private fun lanes(osrmBody: String): List<LaneGroup> {
+        val r = JSONObject(post(VALHALLA, osrmBody)).getJSONArray("routes").getJSONObject(0)
+        val (lats, lons) = decodePolyline6(r.getString("geometry"))
+        val cum = cumulative(lats, lons)
+        val out = ArrayList<LaneGroup>()
+        val legs = r.getJSONArray("legs")
+        for (l in 0 until legs.length()) {
+            val steps = legs.getJSONObject(l).getJSONArray("steps")
+            for (s in 0 until steps.length()) {
+                val xs = steps.getJSONObject(s).optJSONArray("intersections") ?: continue
+                for (x in 0 until xs.length()) {
+                    val inter = xs.getJSONObject(x)
+                    val arr = inter.optJSONArray("lanes") ?: continue
+                    val lanes = (0 until arr.length()).map { k ->
+                        val lane = arr.getJSONObject(k)
+                        val ind = lane.optStringOrNull("valid_indication")
+                            ?: lane.optJSONArray("indications")?.optString(0)
+                        Lane(laneTurn(ind), lane.optBoolean("valid"))
+                    }
+                    if (lanes.size < 2) continue
+                    out += LaneGroup(cum[inter.optInt("geometry_index").coerceIn(0, cum.lastIndex)], lanes)
+                }
+            }
+        }
+        return out.sortedBy { it.alongM }
+    }
+
+    private fun laneTurn(s: String?): LaneTurn = when (s) {
+        "slight right" -> LaneTurn.SlightRight
+        "right" -> LaneTurn.Right
+        "sharp right" -> LaneTurn.SharpRight
+        "uturn" -> LaneTurn.UTurn
+        "sharp left" -> LaneTurn.SharpLeft
+        "left" -> LaneTurn.Left
+        "slight left" -> LaneTurn.SlightLeft
+        else -> LaneTurn.Straight  // "straight", "none"
+    }
+
+    private fun cumulative(lats: DoubleArray, lons: DoubleArray): DoubleArray = DoubleArray(lats.size).also { c ->
+        for (i in 1 until lats.size) c[i] = c[i - 1] + distanceM(lats[i - 1], lons[i - 1], lats[i], lons[i])
     }
 
     private fun get(url: String): String = request(url, null)
