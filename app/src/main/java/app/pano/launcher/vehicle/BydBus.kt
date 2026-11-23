@@ -294,8 +294,15 @@ internal object BydSignals {
 
     /**
      * Kapı, bagaj, kaput, cam ve sunroof durumu. `BYDAutoBodyworkDevice.getDoorState` /
-     * `getWindowOpenPercent` aynı kimlikleri okuyor: kapılarda `BODYWORK_STATE_OPEN` = 1,
-     * `BODYWORK_STATE_CLOSED` = 0 (255 = tanımsız); camlarda 0–100 açıklık yüzdesi.
+     * `getWindowOpenPercent` / `getWindowState` aynı kimlikleri okuyor: kapılarda ve cam durum
+     * sinyallerinde `BODYWORK_STATE_OPEN` = 1, `BODYWORK_STATE_CLOSED` = 0 (255 = tanımsız);
+     * cam yüzdelerinde 0–100 açıklık.
+     *
+     * Araçta (BYD Atto 2, CanFD, Kasım 2026) canlı okumayla bakıldı: veri yolunda yalnızca sürücü
+     * camı değer veriyor. Sağ ön / sağ arka 65535 (okuma yok), sol arka yüzde 255 dönüyor ve yolcu
+     * camları açılıp kapatılırken 3000'den fazla sinyalin hiçbiri değişmedi. Yani bu araç yolcu
+     * camlarını multimedya ünitesine göndermiyor; o camlar bilinmiyor (null) kalır, uydurulmaz.
+     * Başka bir modelde gelirse önce yüzde, o yoksa durum sinyali kullanılır.
      * Hiçbiri okunamazsa null.
      */
     fun openings(): Openings? {
@@ -304,7 +311,30 @@ internal object BydSignals {
             0 -> false
             else -> null
         }
-        fun percent(field: String) = BydBus.readInt("Bodywork", field)?.takeIf { it in 0..100 }
+        val raw = StringBuilder()
+        fun window(name: String, percentField: String, stateField: String): Boolean? {
+            val percent = BydBus.readInt("Bodywork", percentField)
+            val state = BydBus.readInt("Bodywork", stateField)
+            raw.append(name).append('=').append(percent).append('/').append(state).append(' ')
+            return when {
+                percent != null && percent in 0..100 -> percent > 0
+                state == 1 -> true
+                state == 0 -> false
+                else -> null
+            }
+        }
+        fun sunroof(): Boolean? {
+            val percent = BydBus.readInt("Bodywork", "BODYWORK_MOON_ROOF_OPEN_PERCENT")
+            val position = BydBus.readInt("Bodywork", "BODYWORK_SUNROOF_POSITION")
+            raw.append("tavan=").append(percent).append('/').append(position)
+            return when {
+                percent != null && percent in 0..100 -> percent > 0
+                // SUNROOF_POSITION_*: 1 tam açık, 3 yarı açık, 5 havalandırma, 6 konfor; 2 tam kapalı.
+                position in SUNROOF_OPEN_POSITIONS -> true
+                position == 2 -> false
+                else -> null
+            }
+        }
         val o = Openings(
             doorFrontLeft = door("BODYWORK_LEFT_HAND_FRONT_DOOR"),
             doorFrontRight = door("BODYWORK_RIGHT_HAND_FRONT_DOOR"),
@@ -312,23 +342,23 @@ internal object BydSignals {
             doorRearRight = door("BODYWORK_RIGHT_HAND_REAR_DOOR"),
             trunk = door("BODYWORK_LUGGAGE_DOOR"),
             hood = door("BODYWORK_HOOD"),
-            windowFrontLeft = percent("BODYWORK_WINDOW_LEFT_FRONT_PERCENT"),
-            windowFrontRight = percent("BODYWORK_WINDOW_RIGHT_FRONT_PERCENT"),
-            windowRearLeft = percent("BODYWORK_WINDOW_LEFT_REAR_PERCENT"),
-            windowRearRight = percent("BODYWORK_WINDOW_RIGHT_REAR_PERCENT"),
-            sunroof = percent("BODYWORK_MOON_ROOF_OPEN_PERCENT"),
+            windowFrontLeft = window("solÖn", "BODYWORK_WINDOW_LEFT_FRONT_PERCENT", "BODYWORK_LEFT_FRONT_WINDOW"),
+            windowFrontRight = window("sağÖn", "BODYWORK_WINDOW_RIGHT_FRONT_PERCENT", "BODYWORK_RIGHT_FRONT_WINDOW"),
+            windowRearLeft = window("solArka", "BODYWORK_WINDOW_LEFT_REAR_PERCENT", "BODYWORK_LEFT_REAR_WINDOW"),
+            windowRearRight = window("sağArka", "BODYWORK_WINDOW_RIGHT_REAR_PERCENT", "BODYWORK_RIGHT_REAR_WINDOW"),
+            sunroof = sunroof(),
         )
-        if (!loggedOpenings) {
-            // Ölçek araçta henüz doğrulanmadı; ilk okumayı ve cam durum sinyallerini kayda yaz.
-            loggedOpenings = true
-            val states = listOf("LEFT_FRONT", "RIGHT_FRONT", "LEFT_REAR", "RIGHT_REAR")
-                .map { BydBus.readInt("Bodywork", "BODYWORK_${it}_WINDOW") }
-            Log.i("BydBus", "gövde ham: $o cam durumları=$states")
+        // Ham cam değerleri (yüzde/durum) değiştikçe kayda yazılır; başka modellerde teşhis için.
+        val rawText = raw.toString()
+        if (rawText != lastOpeningsRaw) {
+            lastOpeningsRaw = rawText
+            Log.i("BydBus", "gövde ham (yüzde/durum): $rawText")
         }
         return o.takeUnless { it.isEmpty }
     }
 
-    @Volatile private var loggedOpenings = false
+    private val SUNROOF_OPEN_POSITIONS = setOf(1, 3, 5, 6)
+    @Volatile private var lastOpeningsRaw: String? = null
 
     /**
      * Aracın kendi TPMS uyarıları (`BYDAutoTyreDevice` / `BYDAutoInstrumentDevice` sabitleri):
