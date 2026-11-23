@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +27,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.key
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -61,142 +66,228 @@ import app.pano.launcher.settings.Settings
 import app.pano.launcher.settings.ThemeMode
 import app.pano.launcher.ui.theme.Accent
 import app.pano.launcher.ui.theme.LocalPano
+import app.pano.launcher.ui.theme.linkColor
 
 private val VERSION get() = "${app.pano.launcher.update.Updater.currentName} (${app.pano.launcher.update.Updater.currentCode})"
 
+/** Ayarlar ekranının bölümleri. Soldaki listede bu sırayla görünür. */
+private enum class SettingsSection(val title: String, val icon: ImageVector, val tile: Color) {
+    General("Genel", PanoIcons.Home, Color(0xFF8E8E93)),
+    Notifications("Bildirimler", PanoIcons.Message, Color(0xFFFF453A)),
+    Appearance("Görünüm", PanoIcons.Sun, Color(0xFF0A84FF)),
+    Driving("Sürüş ve araç", PanoIcons.Car, Color(0xFF30D158)),
+    Assistant("Pano Asistan", PanoIcons.Assistant, Color(0xFFBF5AF2)),
+    Update("Güncelleme", PanoIcons.Sync, Color(0xFF64D2FF)),
+    Developer("Geliştirici", PanoIcons.Bolt, Color(0xFFFF9F0A)),
+}
+
+/**
+ * Solda bölüm listesi, sağda seçili bölümün ayarları. Klasik düzende tam ekran, CarPlay'de
+ * sağ ekranda (daha dar) açılır; liste genişliği alana göre ayarlanır.
+ */
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
-    val style = LocalStyle.current
-    val context = LocalContext.current
+    var section by rememberSaveable { mutableStateOf(SettingsSection.General) }
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(22.dp)) {
         ScreenHeader("Ayarlar", onBack)
 
-        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            // Sol sütun: genel ayarlar ve geliştirici modu anahtarı
-            Column(
-                Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
-            ) {
-                Group("Genel") {
-                    LinkRow("Android ayarları", "Wi-Fi, Bluetooth, ses, ekran") { Launch.settings(context) }
-                    Divider()
-                    LinkRow("Varsayılan ana ekran", "Pano'yu ana ekran olarak seç") {
-                        Launch.intent(context, Intent(AndroidSettings.ACTION_HOME_SETTINGS))
-                    }
-                    Divider()
-                    LinkRow(
-                        "Bildirim erişimi",
-                        if (MediaHub.hasAccess(context)) "Açık · çalan şarkı gösteriliyor" else "Kapalı · çalan şarkı görünmez",
-                    ) { Launch.notificationAccess(context) }
-                    Divider()
-                    SwitchRowSetting(
-                        "Mesaj bildirimlerini göster",
-                        "WhatsApp ve SMS mesajları ekranın üstünde kısa süre görünür",
-                        style.showMessages,
-                    ) { on -> Settings.update { it.copy(showMessages = on) } }
-                    Divider()
-                    SwitchRowSetting(
-                        "Sistem çubuklarını gizle",
-                        if (app.pano.launcher.system.SystemBars.canApplyGlobal(context)) "Üst ve alt çubuk her yerde gizli; görmek için ekran kenarından kaydır"
-                        else "Yalnızca Pano'da. Uygulamalarda da gizlemek için bir kez: adb shell pm grant app.pano.launcher android.permission.WRITE_SECURE_SETTINGS",
-                        style.hideSystemBar,
-                    ) { on -> Settings.update { it.copy(hideSystemBar = on) } }
-                }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val navWidth = if (maxWidth > 1000.dp) 300.dp else 214.dp
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                SectionList(section, { section = it }, Modifier.width(navWidth).fillMaxHeight())
 
-                Group("Pano Asistan") { AssistantKeySettings() }
-
-                Group("Güncelleme") { UpdateSettings() }
-
-                Group("Geliştirici") {
-                    SwitchRowSetting(
-                        "Geliştirici modu",
-                        "Görünümü değiştirmek için stil seçeneklerini açar",
-                        style.developerMode,
-                    ) { on -> Settings.update { it.copy(developerMode = on) } }
-                    Divider()
-                    SwitchRowSetting(
-                        "Sürüşte kısıtla",
-                        "Araç hareket ederken kartları gizler, Uygulamalar/Ayarlar ve videoyu kilitler",
-                        style.drivingLock,
-                    ) { on -> Settings.update { it.copy(drivingLock = on) } }
-                    Divider()
-                    SwitchRowSetting(
-                        "Araca komut gönder (deneysel)",
-                        "Sürüş modu ve rejen seviyesini değiştirir; yalnızca park halinde. Araçta henüz denenmedi",
-                        style.vehicleCommands,
-                    ) { on -> Settings.update { it.copy(vehicleCommands = on) } }
-                    if (style.vehicleCommands) DriveCommandRows()
-                }
-
-                Text(
-                    "Pano $VERSION",
-                    color = LocalPano.current.tertiary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
-            }
-
-            // Sağ sütun: stil seçenekleri (sadece geliştirici modunda)
-            Column(
-                Modifier.weight(1.3f).fillMaxHeight().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
-            ) {
-                if (style.developerMode) {
-                    Group("Stil") {
-                        OptionRow("Arayüz") {
-                            Segmented(LayoutStyle.entries.map { it.label }, style.layout.ordinal, { i ->
-                                Settings.update { it.copy(layout = LayoutStyle.entries[i]) }
-                            }, Modifier.width(440.dp))
-                        }
-                        Divider()
-                        OptionRow("Tema") {
-                            Segmented(ThemeMode.entries.map { it.label }, style.theme.ordinal, { i ->
-                                Settings.update { it.copy(theme = ThemeMode.entries[i]) }
-                            }, Modifier.width(440.dp))
-                        }
-                        Divider()
-                        OptionRow("Dock ikonları") {
-                            Segmented(DockStyle.entries.map { it.label }, style.dock.ordinal, { i ->
-                                Settings.update { it.copy(dock = DockStyle.entries[i]) }
-                            }, Modifier.width(440.dp))
-                        }
-                        Divider()
-                        OptionRow("Vurgu rengi") { AccentPicker(style.accent) }
-                        Divider()
-                        OptionRow("Yazı tipi") {
-                            Segmented(FontChoice.entries.map { it.label }, style.font.ordinal, { i ->
-                                Settings.update { it.copy(font = FontChoice.entries[i]) }
-                            }, Modifier.width(440.dp))
-                        }
-                        Divider()
-                        OptionRow("Gündüz haritası") {
-                            Segmented(MapStyle.entries.map { it.label }, style.map.ordinal, { i ->
-                                Settings.update { it.copy(map = MapStyle.entries[i]) }
-                            }, Modifier.width(440.dp))
-                        }
-                    }
-
-                    Box(
-                        Modifier.fillMaxWidth().height(64.dp)
-                            .surface(RoundedCornerShape(22.dp), LocalPano.current.card, LocalPano.current.isDark, LocalPano.current.hairline)
-                            .clickable(role = Role.Button) { Settings.resetStyles() },
-                        contentAlignment = Alignment.Center,
+                // Her bölüm kendi kaydırma durumuyla açılır (bölüm değişince en üstten başlar).
+                key(section) {
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
                     ) {
-                        Text("Varsayılan stile dön", color = Accent.Red, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                } else {
-                    PanoCard(Modifier.fillMaxWidth(), padding = 32.dp) {
-                        Text("Stil seçenekleri kapalı", color = LocalPano.current.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Arayüzü (Klasik / CarPlay), temayı, dock ikonlarını, vurgu rengini, yazı tipini ve harita görünümünü değiştirmek için geliştirici modunu aç. " +
-                                "Bir şey ters giderse buradan tek dokunuşla varsayılan stile dönebilirsin.",
-                            color = LocalPano.current.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, lineHeight = 24.sp,
-                            modifier = Modifier.padding(top = 10.dp),
-                        )
+                        when (section) {
+                            SettingsSection.General -> GeneralSection()
+                            SettingsSection.Notifications -> NotificationSection()
+                            SettingsSection.Appearance -> AppearanceSection { section = SettingsSection.Developer }
+                            SettingsSection.Driving -> DrivingSection()
+                            SettingsSection.Assistant -> Group("Gemini Live") { AssistantKeySettings() }
+                            SettingsSection.Update -> Group("Pano güncellemesi") { UpdateSettings() }
+                            SettingsSection.Developer -> DeveloperSection()
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SectionList(selected: SettingsSection, onSelect: (SettingsSection) -> Unit, modifier: Modifier) {
+    val colors = LocalPano.current
+    Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SettingsSection.entries.forEach { s ->
+            val isSel = s == selected
+            val shape = RoundedCornerShape(20.dp)
+            Row(
+                Modifier.fillMaxWidth().height(64.dp)
+                    .then(if (isSel) Modifier.surface(shape, colors.card, colors.isDark, colors.hairline, elevation = 8.dp) else Modifier.clip(shape))
+                    .clickable(role = Role.Tab) { onSelect(s) }
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(s.tile),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(s.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                }
+                Text(
+                    s.title, color = if (isSel) colors.text else colors.secondary,
+                    fontSize = 18.sp, fontWeight = if (isSel) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1,
+                    modifier = Modifier.padding(start = 14.dp),
+                )
+            }
+        }
+        Text(
+            "Pano $VERSION",
+            color = colors.tertiary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(start = 14.dp, top = 12.dp),
+        )
+    }
+}
+
+@Composable
+private fun GeneralSection() {
+    val style = LocalStyle.current
+    val context = LocalContext.current
+    Group("Sistem") {
+        LinkRow("Android ayarları", "Wi-Fi, Bluetooth, ses, ekran") { Launch.settings(context) }
+        Divider()
+        LinkRow("Varsayılan ana ekran", "Pano'yu ana ekran olarak seç") {
+            Launch.intent(context, Intent(AndroidSettings.ACTION_HOME_SETTINGS))
+        }
+    }
+    Group("Ekran") {
+        SwitchRowSetting(
+            "Sistem çubuklarını gizle",
+            if (app.pano.launcher.system.SystemBars.canApplyGlobal(context)) "Üst ve alt çubuk her yerde gizli; görmek için ekran kenarından kaydır"
+            else "Yalnızca Pano'da. Uygulamalarda da gizlemek için bir kez: adb shell pm grant app.pano.launcher android.permission.WRITE_SECURE_SETTINGS",
+            style.hideSystemBar,
+        ) { on -> Settings.update { it.copy(hideSystemBar = on) } }
+    }
+}
+
+@Composable
+private fun NotificationSection() {
+    val style = LocalStyle.current
+    val context = LocalContext.current
+    Group("İzin") {
+        LinkRow(
+            "Bildirim erişimi",
+            if (MediaHub.hasAccess(context)) "Açık · çalan şarkı gösteriliyor" else "Kapalı · çalan şarkı görünmez",
+        ) { Launch.notificationAccess(context) }
+    }
+    Group("Mesajlar") {
+        SwitchRowSetting(
+            "Mesaj bildirimlerini göster",
+            "WhatsApp ve SMS mesajları ekranın üstünde kısa süre görünür",
+            style.showMessages,
+        ) { on -> Settings.update { it.copy(showMessages = on) } }
+    }
+}
+
+/** Stil seçenekleri yalnızca geliştirici modunda açılır; kapalıyken nasıl açılacağı anlatılır. */
+@Composable
+private fun AppearanceSection(openDeveloper: () -> Unit) {
+    val style = LocalStyle.current
+    val colors = LocalPano.current
+    if (!style.developerMode) {
+        PanoCard(Modifier.fillMaxWidth(), padding = 32.dp) {
+            Text("Stil seçenekleri kapalı", color = colors.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Arayüzü (Klasik / CarPlay), temayı, dock ikonlarını, vurgu rengini, yazı tipini ve harita görünümünü değiştirmek için geliştirici modunu aç. " +
+                    "Bir şey ters giderse buradan tek dokunuşla varsayılan stile dönebilirsin.",
+                color = colors.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, lineHeight = 24.sp,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+            Box(Modifier.padding(top = 18.dp)) {
+                SmallButton("Geliştirici bölümüne git", enabled = true, color = linkColor(), onClick = openDeveloper)
+            }
+        }
+        return
+    }
+    Group("Düzen") {
+        OptionRow("Arayüz") {
+            Segmented(LayoutStyle.entries.map { it.label }, style.layout.ordinal, { i ->
+                Settings.update { it.copy(layout = LayoutStyle.entries[i]) }
+            }, Modifier.width(440.dp))
+        }
+        Divider()
+        OptionRow("Dock ikonları") {
+            Segmented(DockStyle.entries.map { it.label }, style.dock.ordinal, { i ->
+                Settings.update { it.copy(dock = DockStyle.entries[i]) }
+            }, Modifier.width(440.dp))
+        }
+    }
+    Group("Tema ve renk") {
+        OptionRow("Tema") {
+            Segmented(ThemeMode.entries.map { it.label }, style.theme.ordinal, { i ->
+                Settings.update { it.copy(theme = ThemeMode.entries[i]) }
+            }, Modifier.width(440.dp))
+        }
+        Divider()
+        OptionRow("Vurgu rengi") { AccentPicker(style.accent) }
+        Divider()
+        OptionRow("Yazı tipi") {
+            Segmented(FontChoice.entries.map { it.label }, style.font.ordinal, { i ->
+                Settings.update { it.copy(font = FontChoice.entries[i]) }
+            }, Modifier.width(440.dp))
+        }
+    }
+    Group("Harita") {
+        OptionRow("Gündüz haritası") {
+            Segmented(MapStyle.entries.map { it.label }, style.map.ordinal, { i ->
+                Settings.update { it.copy(map = MapStyle.entries[i]) }
+            }, Modifier.width(440.dp))
+        }
+    }
+    Box(
+        Modifier.fillMaxWidth().height(64.dp)
+            .surface(RoundedCornerShape(22.dp), colors.card, colors.isDark, colors.hairline)
+            .clickable(role = Role.Button) { Settings.resetStyles() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("Varsayılan stile dön", color = Accent.Red, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun DrivingSection() {
+    val style = LocalStyle.current
+    Group("Sürüş güvenliği") {
+        SwitchRowSetting(
+            "Sürüşte kısıtla",
+            "Araç hareket ederken kartları gizler, Uygulamalar/Ayarlar ve videoyu kilitler",
+            style.drivingLock,
+        ) { on -> Settings.update { it.copy(drivingLock = on) } }
+    }
+    Group("Araç komutları") {
+        SwitchRowSetting(
+            "Araca komut gönder (deneysel)",
+            "Sürüş modu ve rejen seviyesini değiştirir; yalnızca park halinde. Araçta henüz denenmedi",
+            style.vehicleCommands,
+        ) { on -> Settings.update { it.copy(vehicleCommands = on) } }
+        if (style.vehicleCommands) DriveCommandRows()
+    }
+}
+
+@Composable
+private fun DeveloperSection() {
+    val style = LocalStyle.current
+    Group("Geliştirici") {
+        SwitchRowSetting(
+            "Geliştirici modu",
+            "Görünümü değiştirmek için stil seçeneklerini açar (Görünüm bölümü)",
+            style.developerMode,
+        ) { on -> Settings.update { it.copy(developerMode = on) } }
     }
 }
 
@@ -360,7 +451,10 @@ private fun OptionRow(title: String, control: @Composable () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Etiket sabit genişlikte; kontrol kalan alana sığar (sağ ekran gibi dar alanlarda ezilmez).
-        Text(title, color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.width(130.dp))
+        Text(
+            title, color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+            modifier = Modifier.widthIn(min = 130.dp).padding(end = 16.dp),
+        )
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { control() }
     }
 }
@@ -369,7 +463,11 @@ private fun OptionRow(title: String, control: @Composable () -> Unit) {
 @Composable
 private fun AccentPicker(selected: AccentChoice) {
     val colors = LocalPano.current
-    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+    // Dar alanda (CarPlay sağ ekranı) aralık daralır, örnekler sığar.
+    BoxWithConstraints(contentAlignment = Alignment.CenterEnd) {
+    val n = AccentChoice.entries.size
+    val gap = ((maxWidth - 48.dp * n) / (n - 1)).coerceIn(4.dp, 14.dp)
+    Row(horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
         AccentChoice.entries.forEach { choice ->
             val isSel = choice == selected
             Box(
@@ -383,6 +481,7 @@ private fun AccentPicker(selected: AccentChoice) {
                     .semantics { contentDescription = "Vurgu rengi: ${choice.label}" },
             )
         }
+    }
     }
 }
 
