@@ -91,6 +91,9 @@ import app.pano.launcher.navigation.NavPhase
 import app.pano.launcher.navigation.NavSession
 import app.pano.launcher.navigation.PanoNav
 import app.pano.launcher.navigation.RouteEngine
+import app.pano.launcher.navigation.ChargerSearch
+import app.pano.launcher.navigation.SavedPlaces
+import app.pano.launcher.navigation.Shortcut
 import app.pano.launcher.navigation.formatDistance
 import app.pano.launcher.navigation.formatDuration
 import androidx.compose.foundation.layout.heightIn
@@ -971,7 +974,7 @@ private fun MapWidget(modifier: Modifier) {
 }
 
 @Composable
-private fun ManeuverCard(
+internal fun ManeuverCard(
     distance: String?,
     title: String,
     eta: String?,
@@ -1013,7 +1016,7 @@ private fun ManeuverCard(
 }
 
 /** Valhalla manevra türüne göre ok. */
-private fun maneuverIcon(type: Int): ImageVector = when (type) {
+internal fun maneuverIcon(type: Int): ImageVector = when (type) {
     4, 5, 6 -> PanoIcons.Flag
     9, 18, 20, 23, 37 -> PanoIcons.SlightRight
     10, 11 -> PanoIcons.TurnRight
@@ -1030,7 +1033,7 @@ private fun arrivalClock(remainingS: Double): String =
 
 /** Yönlendirme sırasında haritanın altında: varış saati, kalan süre/mesafe ve "Bitir". */
 @Composable
-private fun NavBottomBar(session: NavSession, modifier: Modifier) {
+internal fun NavBottomBar(session: NavSession, modifier: Modifier) {
     val c = glass()
     val route = session.route ?: return
     val remainingS = session.progress?.remainingS ?: route.timeS
@@ -1057,23 +1060,32 @@ private fun NavBottomBar(session: NavSession, modifier: Modifier) {
 }
 
 /**
- * Sağ ekrandaki "Nereye?": üstte arama kutusu; yazarken sonuçlar, boşken son gidilenler.
- * Bir yer seçilince rota önizlemesi (süre, mesafe, varış) ve "Başlat". Yönlendirme sürerken
- * hedef özeti, sıradaki manevralar ve "Navigasyonu bitir".
+ * Sağ ekrandaki "Nereye?": üstte arama kutusu, altında Ev / İş / Şarj kısayolları; yazarken sonuçlar,
+ * boşken son gidilenler. Bir yer seçilince rota önizlemesi (süre, mesafe, varış) ve "Başlat".
+ * Yönlendirme sürerken hedef özeti, sıradaki manevralar ve "Navigasyonu bitir".
  */
 @Composable
-private fun NavScreen(modifier: Modifier, onClose: () -> Unit) {
+internal fun NavScreen(modifier: Modifier, onClose: () -> Unit) {
     val c = glass()
     val context = LocalContext.current
-    LaunchedEffect(Unit) { PanoNav.init(context) }
+    LaunchedEffect(Unit) { PanoNav.init(context); SavedPlaces.init(context) }
     val session by PanoNav.state.collectAsState()
     val recents by PanoNav.recents.collectAsState()
+    val saved by SavedPlaces.places.collectAsState()
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<app.pano.launcher.navigation.Place>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     // Önizleme ya da yönlendirme varken arama kutusuna yazılırsa yeniden arama moduna geçilir.
     var forceSearch by remember { mutableStateOf(false) }
     val here = remember { PanoNav.bestLastKnown(context) ?: PanoNav.lastLocation }
+    // Seçilen yer bu kısayola kaydedilecek ("Ev ekle" / "Değiştir").
+    var pickFor by remember { mutableStateOf<Shortcut?>(null) }
+    // Uzun basılan kısayol: "Değiştir / Kaldır" gösterilir.
+    var menuFor by remember { mutableStateOf<Shortcut?>(null) }
+    // Şarj istasyonu listesi: chargers null = yükleniyor.
+    var charging by remember { mutableStateOf(false) }
+    var chargers by remember { mutableStateOf<List<app.pano.launcher.navigation.Place>?>(null) }
+    var chargeError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(query) {
         if (query.trim().length < 2) { results = emptyList(); searching = false; return@LaunchedEffect }
@@ -1083,35 +1095,148 @@ private fun NavScreen(modifier: Modifier, onClose: () -> Unit) {
         searching = false
     }
 
+    LaunchedEffect(charging) {
+        if (!charging) return@LaunchedEffect
+        chargers = null
+        chargeError = null
+        val loc = PanoNav.bestLastKnown(context) ?: PanoNav.lastLocation ?: here
+        if (loc == null) {
+            chargeError = "Konum bilinmiyor; yakındaki istasyonlar aranamadı"
+            chargers = emptyList()
+            return@LaunchedEffect
+        }
+        val found = ChargerSearch.near(loc.latitude, loc.longitude)
+        if (found == null) chargeError = "Şarj istasyonları alınamadı; bağlantıyı kontrol et"
+        chargers = found ?: emptyList()
+    }
+
+    fun choose(place: app.pano.launcher.navigation.Place) {
+        val target = pickFor
+        query = ""
+        if (target != null) {
+            SavedPlaces.set(target, place)
+            pickFor = null
+            return
+        }
+        charging = false
+        forceSearch = false
+        PanoNav.preview(context, place)
+    }
+
     val s = session
     Column(modifier) {
-        if (s == null || forceSearch || query.isNotEmpty()) {
-            SearchField(query, onChange = { query = it; forceSearch = true }, autoFocus = s == null)
-            val list = if (query.trim().length >= 2) results else recents
+        if (s == null || forceSearch || query.isNotEmpty() || pickFor != null) {
+            SearchField(
+                query,
+                onChange = { query = it; forceSearch = true; menuFor = null; if (pickFor == null) charging = false },
+                autoFocus = s == null || pickFor != null,
+            )
+            val typing = query.trim().length >= 2
+            val pick = pickFor
+            val showChargers = charging && pick == null && !typing
+            when {
+                pick != null -> ModeBar("${pick.label} olarak kaydedilecek yeri seç") { pickFor = null; query = "" }
+                showChargers -> ModeBar("Yakındaki şarj istasyonları") { charging = false }
+                !typing -> {
+                    val menu = menuFor
+                    Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (menu != null) {
+                            NavButton("${menu.label}: Değiştir", c.chip, c.text, Modifier.weight(1f)) { menuFor = null; pickFor = menu }
+                            NavButton("Kaldır", Color(0xFFFF453A), Color.White) { SavedPlaces.remove(menu); menuFor = null }
+                            NavButton("Vazgeç", c.chip, c.text) { menuFor = null }
+                        } else {
+                            Shortcut.entries.forEach { sc ->
+                                val place = saved[sc]
+                                ShortcutButton(
+                                    icon = if (sc == Shortcut.Home) PanoIcons.Home else PanoIcons.Work,
+                                    title = if (place != null) sc.label else "${sc.label} ekle",
+                                    subtitle = place?.name,
+                                    modifier = Modifier.weight(1f),
+                                    onLongClick = if (place != null) ({ menuFor = sc }) else null,
+                                ) {
+                                    if (place != null) choose(place) else { pickFor = sc; query = "" }
+                                }
+                            }
+                            ShortcutButton(PanoIcons.Bolt, "Şarj", "Yakındakiler", Modifier.weight(1f), onLongClick = null) { charging = true }
+                        }
+                    }
+                }
+            }
+            val list = when {
+                typing -> results
+                showChargers -> chargers ?: emptyList()
+                else -> recents
+            }
             Text(
                 when {
-                    query.trim().length >= 2 && searching -> "Aranıyor…"
-                    query.trim().length >= 2 && results.isEmpty() -> "Sonuç bulunamadı"
-                    query.trim().length >= 2 -> "Sonuçlar"
+                    typing && searching -> "Aranıyor…"
+                    typing && results.isEmpty() -> "Sonuç bulunamadı"
+                    typing -> "Sonuçlar"
+                    showChargers && chargers == null -> "Aranıyor…"
+                    showChargers && chargeError != null -> chargeError ?: ""
+                    showChargers && list.isEmpty() -> "Yakında şarj istasyonu bulunamadı"
+                    showChargers -> "En yakından uzağa · OpenStreetMap verisi"
                     recents.isEmpty() -> "Adres, yer ya da işletme adı yaz"
                     else -> "Son gidilenler"
                 },
                 color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
                 modifier = Modifier.padding(start = 8.dp, top = 18.dp, bottom = 6.dp),
             )
+            val icon = when {
+                typing -> PanoIcons.Pin
+                showChargers -> PanoIcons.Bolt
+                else -> PanoIcons.Clock
+            }
             androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                 items(list.size) { i ->
                     val place = list[i]
-                    PlaceRow(place, here, recent = query.trim().length < 2) {
-                        query = ""
-                        forceSearch = false
-                        PanoNav.preview(context, place)
-                    }
+                    PlaceRow(place, here, icon) { choose(place) }
                 }
             }
         } else {
             RouteSummary(s, onSearch = { forceSearch = true }, onStarted = onClose)
         }
+    }
+}
+
+/** Kısayol / kategori düğmesi: büyük, ikonlu; kayıtlıysa altında yerin adı. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun ShortcutButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String?,
+    modifier: Modifier,
+    onLongClick: (() -> Unit)?,
+    onClick: () -> Unit,
+) {
+    val c = glass()
+    Row(
+        modifier.pressScale().height(80.dp).clip(RoundedCornerShape(24.dp)).background(c.chip)
+            .combinedClickable(role = Role.Button, onLongClick = onLongClick, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = linkColor(), modifier = Modifier.size(28.dp))
+        Column(Modifier.padding(start = 12.dp)) {
+            Text(title, color = c.text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (subtitle != null) {
+                Text(subtitle, color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** Arama kutusunun altında süren modu (kısayol kaydetme, şarj listesi) ve çıkış düğmesini gösterir. */
+@Composable
+private fun ModeBar(text: String, onCancel: () -> Unit) {
+    val c = glass()
+    Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text, color = c.text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(start = 8.dp),
+        )
+        NavButton("Vazgeç", c.chip, c.text, onClick = onCancel)
     }
 }
 
@@ -1144,7 +1269,7 @@ private fun SearchField(query: String, onChange: (String) -> Unit, autoFocus: Bo
 }
 
 @Composable
-private fun PlaceRow(place: app.pano.launcher.navigation.Place, here: android.location.Location?, recent: Boolean, onClick: () -> Unit) {
+private fun PlaceRow(place: app.pano.launcher.navigation.Place, here: android.location.Location?, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
     val c = glass()
     Row(
         Modifier.fillMaxWidth().heightIn(min = 76.dp).clip(RoundedCornerShape(20.dp)).clickable(role = Role.Button, onClick = onClick)
@@ -1152,7 +1277,7 @@ private fun PlaceRow(place: app.pano.launcher.navigation.Place, here: android.lo
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(48.dp).clip(CircleShape).background(c.chip), contentAlignment = Alignment.Center) {
-            Icon(if (recent) PanoIcons.Clock else PanoIcons.Pin, contentDescription = null, tint = c.text, modifier = Modifier.size(24.dp))
+            Icon(icon, contentDescription = null, tint = c.text, modifier = Modifier.size(24.dp))
         }
         Column(Modifier.weight(1f).padding(start = 16.dp)) {
             Text(place.name, color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1692,7 +1817,7 @@ private fun duration(ms: Long): String {
  * Kapağa dokununca kaynak uygulama tam ekran açılır.
  */
 @Composable
-private fun NowPlayingScreen(modifier: Modifier) {
+internal fun NowPlayingScreen(modifier: Modifier) {
     val c = glass()
     val context = LocalContext.current
     val playing by MediaHub.state.collectAsState()

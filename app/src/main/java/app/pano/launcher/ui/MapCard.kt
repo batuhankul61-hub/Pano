@@ -171,6 +171,53 @@ class MapHolder internal constructor(val view: MapView) {
     internal var locationOn = false
     /** Kameranın en son hangi navigasyon aşamasına göre ayarlandığı (aynı aşamada tekrar ayarlanmasın). */
     internal var cameraPhase: String? = null
+    /** Kaydırma / yakınlaştırma jestleri açık mı (yalnızca Ufuk düzeninde). */
+    internal var interactive = false
+    internal var gestureListenerAdded = false
+    /** Son kullanılan kenar boşlukları; "Ortala" kamerayı bunlarla yeniden kurar. */
+    internal var lastBottomInset = 0.33f
+    internal var lastEndInset = 0f
+    /** Kullanıcı haritayı elle kaydırdı ya da yakınlaştırdı: kamera aracı izlemiyor. */
+    internal val freeCamera = mutableStateOf(false)
+}
+
+/**
+ * Harita düğmeleri için: yakınlaştır / uzaklaştır ve "Ortala". Araç izlenirken düğmeyle
+ * yakınlaştırmak izlemeyi bozmaz; parmakla kaydırmak ya da sıkıştırmak bozar.
+ */
+class MapControls internal constructor(private val holder: MapHolder) {
+    /** Harita elle oynatıldı mı (Ortala düğmesi bunu gösterir). */
+    val isFree: Boolean get() = holder.freeCamera.value
+
+    fun zoomIn() = zoom(1.0)
+    fun zoomOut() = zoom(-1.0)
+
+    private fun zoom(delta: Double) {
+        val map = holder.map ?: return
+        val target = (map.cameraPosition.zoom + delta).coerceIn(3.0, 19.0)
+        val location = if (holder.locationOn) map.locationComponent else null
+        if (location != null && location.cameraMode != CameraMode.NONE) {
+            location.zoomWhileTracking(target, 300)
+        } else {
+            map.animateCamera(CameraUpdateFactory.zoomTo(target), 300)
+        }
+    }
+
+    fun recenter() = recenterMap(holder)
+}
+
+@Composable
+internal fun rememberMapControls(): MapControls {
+    val holder = checkNotNull(LocalMapHolder.current) { "rememberMapControls, ProvideMapHolder içinde kullanılmalı" }
+    return remember(holder) { MapControls(holder) }
+}
+
+/** Kamerayı navigasyon durumuna göre yeniden kurar (araç takibi / rota önizlemesi). */
+private fun recenterMap(holder: MapHolder) {
+    val map = holder.map ?: return
+    holder.cameraPhase = null
+    val s = PanoNav.state.value
+    applyNavCamera(holder, map, holder.view, s?.route, s?.phase, holder.lastBottomInset, holder.lastEndInset)
 }
 
 private val LocalMapHolder = staticCompositionLocalOf<MapHolder?> { null }
@@ -212,7 +259,15 @@ fun ProvideMapHolder(content: @Composable () -> Unit) {
 
 /** Paylaşılan haritayı bu karta yerleştirir. Stil ve konum katmanı yalnızca gerçekten değişince yeniden kurulur. */
 @Composable
-internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, bottomInset: Float = 0.33f) {
+internal fun LiveMap(
+    modifier: Modifier,
+    dark: Boolean,
+    showLocation: Boolean,
+    bottomInset: Float = 0.33f,
+    endInset: Float = 0f,
+    /** Kaydırma ve sıkıştırarak yakınlaştırma. Kapalıyken harita yalnızca gösterir (Klasik, CarPlay). */
+    interactive: Boolean = false,
+) {
     val context = LocalContext.current
     val holder = checkNotNull(LocalMapHolder.current) { "LiveMap, ProvideMapHolder içinde kullanılmalı" }
     val mapView = holder.view
@@ -221,11 +276,19 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
     var locationMap by remember { mutableStateOf(if (holder.locationOn) holder.map else null) }
 
     val styleUrl = if (dark) STYLE_NIGHT else LocalStyle.current.map.dayUrl
-    LaunchedEffect(styleUrl, showLocation, bottomInset) {
+    LaunchedEffect(styleUrl, showLocation, bottomInset, endInset, interactive) {
         mapView.getMapAsync { map ->
             holder.map = map
+            holder.interactive = interactive
+            holder.lastBottomInset = bottomInset
+            holder.lastEndInset = endInset
             map.uiSettings.apply {
-                setAllGesturesEnabled(false)
+                setAllGesturesEnabled(interactive)
+                if (interactive) {
+                    // Araçta döndürme ve eğme kafa karıştırır; yalnızca kaydırma ve yakınlaştırma.
+                    isRotateGesturesEnabled = false
+                    isTiltGesturesEnabled = false
+                }
                 isLogoEnabled = false
                 isCompassEnabled = false
                 // Atıf yazısını kartın köşesinde kendimiz gösteriyoruz (MapCard).
@@ -234,9 +297,21 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
             // Kartın altındaki panel haritanın bir kısmını kapatıyor; merkezi görünen kısma kaydır.
             // Yeniden takılan harita henüz ölçülmemiş olabilir, bu yüzden yerleşimden sonra ayarlanıyor.
             mapView.post {
-                map.setPadding(0, 0, 0, (mapView.height * bottomInset).toInt())
+                map.setPadding(0, 0, (mapView.width * endInset).toInt(), (mapView.height * bottomInset).toInt())
                 map.triggerRepaint() // yeniden takılan yüzey boş kalmasın
             }
+            // Parmakla oynatılınca araç takibi bırakılır; "Ortala" geri getirir.
+            if (!holder.gestureListenerAdded) {
+                holder.gestureListenerAdded = true
+                map.addOnCameraMoveStartedListener { reason ->
+                    if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE && holder.interactive) {
+                        holder.freeCamera.value = true
+                        if (holder.locationOn) map.locationComponent.cameraMode = CameraMode.NONE
+                    }
+                }
+            }
+            // Elle oynatılmış harita, jestsiz bir düzene geçilince kendiliğinden ortalanır.
+            if (!interactive && holder.freeCamera.value) mapView.post { recenterMap(holder) }
             if (map.cameraPosition.zoom < 3) {
                 map.cameraPosition = CameraPosition.Builder().target(FALLBACK).zoom(13.0).build()
             }
@@ -264,11 +339,11 @@ internal fun LiveMap(modifier: Modifier, dark: Boolean, showLocation: Boolean, b
     val nav by PanoNav.state.collectAsState()
     val route = nav?.route
     val phase = nav?.phase
-    LaunchedEffect(route, phase, locationMap) {
+    LaunchedEffect(route, phase, locationMap, endInset) {
         mapView.getMapAsync { map ->
             val style = map.style?.takeIf { it.isFullyLoaded } ?: return@getMapAsync
             drawRoute(style, route)
-            applyNavCamera(holder, map, mapView, route, phase, bottomInset)
+            applyNavCamera(holder, map, mapView, route, phase, bottomInset, endInset)
         }
     }
 
@@ -333,10 +408,13 @@ private fun drawRoute(style: Style, route: Route?) {
  * Kamera: önizlemede rotanın tamamı, yönlendirmede araç arkadan ve yakından (gidiş yönüne dönük),
  * navigasyon yokken her zamanki kuzey yukarı takip. Yalnızca aşama değişince ayarlanır.
  */
-private fun applyNavCamera(holder: MapHolder, map: MapLibreMap, view: MapView, route: Route?, phase: NavPhase?, bottomInset: Float) {
-    val key = "${phase}-${route?.hashCode()}"
+private fun applyNavCamera(holder: MapHolder, map: MapLibreMap, view: MapView, route: Route?, phase: NavPhase?, bottomInset: Float, endInset: Float = 0f) {
+    // endInset: haritanın sağında üstüne kart açılan kısım (oran); rota ve araç görünen kısma sığdırılır.
+    val key = "${phase}-${route?.hashCode()}-$endInset"
+    val right = (view.width * endInset).toInt()
     if (holder.cameraPhase == key) return
     holder.cameraPhase = key
+    holder.freeCamera.value = false
     val location = if (holder.locationOn) map.locationComponent else null
     val h = view.height
     when {
@@ -346,16 +424,16 @@ private fun applyNavCamera(holder: MapHolder, map: MapLibreMap, view: MapView, r
             map.setPadding(0, 0, 0, (h * bottomInset).toInt())
             val bounds = LatLngBounds.Builder().apply { route.lats.indices.forEach { include(LatLng(route.lats[it], route.lons[it])) } }.build()
             val pad = (minOf(view.width, h) * 0.12f).toInt()
-            map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, pad, (h * 0.22f).toInt(), pad, pad + (h * bottomInset).toInt()), 600)
+            map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, pad, (h * 0.22f).toInt(), pad + right, pad + (h * bottomInset).toInt()), 600)
         }
         phase == NavPhase.Active && route != null -> {
             // Araç ekranın alt üçte birinde, önü görünsün; üstte manevra kartı var.
-            map.setPadding(0, (h * 0.45f).toInt(), 0, (h * bottomInset).toInt())
+            map.setPadding(0, (h * 0.45f).toInt(), right, (h * bottomInset).toInt())
             location?.renderMode = RenderMode.GPS
             location?.track(CameraMode.TRACKING_GPS, zoom = 16.5, tilt = 45.0)
         }
         else -> {
-            map.setPadding(0, 0, 0, (h * bottomInset).toInt())
+            map.setPadding(0, 0, right, (h * bottomInset).toInt())
             location?.renderMode = RenderMode.NORMAL
             location?.track(CameraMode.TRACKING, zoom = 13.0, tilt = 0.0)
             if (location == null) map.easeCamera(CameraUpdateFactory.tiltTo(0.0))
