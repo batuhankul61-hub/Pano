@@ -1,11 +1,13 @@
-# Pano'nun yeni sürümünü yayımlar: release APK'yı derler, Pano-APK klasörüne kopyalar ve GitHub'da
+﻿# Pano'nun yeni sürümünü yayımlar: release APK'yı derler, Pano-APK klasörüne kopyalar ve GitHub'da
 # "v<versionCode>" etiketli bir sürüm (Release) oluşturur. Araçtaki Pano, Ayarlar > Güncelleme'den bunu görür.
 #
 # Kullanım (proje kökünde, main dalında, değişiklikler commit'lenmiş olarak):
 #   .\scripts\yayinla.ps1 "Bu sürümde neler var"
 param([string]$Notlar = "")
 
-$ErrorActionPreference = "Stop"
+# Yerel komutlar (git, gh) bilgi mesajlarını stderr'e yazar; PowerShell 5.1 bunları hata sayıp durmasın diye
+# hata denetimi çıkış koduyla yapılır.
+$ErrorActionPreference = "Continue"
 $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
 
@@ -24,7 +26,9 @@ $hedef = Join-Path (Split-Path (Get-Location) -Parent) "Pano-APK\$ad"
 Copy-Item $apk $hedef
 Copy-Item $apk (Join-Path $env:TEMP $ad) -Force
 
-git push origin HEAD
+git push origin HEAD 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "git push başarısız" }
 if (-not $Notlar) { $Notlar = (git log -1 --format=%s) }
 & $gh release create "v$kod" (Join-Path $env:TEMP $ad) --title "Pano 0.2.$kod" --notes $Notlar --target (git rev-parse HEAD)
+if ($LASTEXITCODE -ne 0) { throw "GitHub sürümü oluşturulamadı" }
 Write-Host "Yayımlandı: v$kod → $hedef"
