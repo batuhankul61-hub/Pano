@@ -15,7 +15,7 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 - Emülatörler (adb: `$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe`; kullanıcının kendi PowerShell'inde bu yol `C:\Users\batuh\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\Android\Sdk\...`):
   - **`PanoCar10` (`-port 5556` → `emulator-5556`): araca en yakın olan.** Android 10 (API 29, google_apis), 1280×720, 160 dpi; araçtaki gibi `enable_freeform_support=1`, `force_resizable_activities=1`, Pano'ya SYSTEM_ALERT_WINDOW ve WRITE_SECURE_SETTINGS verildi. Sağ panel, sistem çubukları, bölünmüş ekran burada denenir. Başlat: `emulator.exe -avd PanoCar10 -port 5556`. İkisi açıkken kurulum için `$env:ANDROID_SERIAL = "emulator-5556"`.
   - `PanoCar` (`emulator-5554`): Android 15, 1920×1080, 240 dpi; pencere/çubuk davranışı araçtan farklı.
-- Araç (BYD Atto 2, DiLink 3.0, Android 10, 1280×720): ana ekran aracın kendi launcher'ı (`aracın launcher paketi`), Pano normal uygulama olarak çalışır. Freeform açık. Araçta Google servisleri ve TTS yok. Spotify'ı `com.vivid.music.byd` kabuğu açar.
+- Araç (BYD Atto 2, DiLink 3.0, Android 10, 1280×720): ana ekran aracın kendi launcher'ıdır, Pano normal uygulama olarak çalışır. Freeform açık. Araçta Google servisleri ve TTS yok. Spotify'ı `com.vivid.music.byd` kabuğu açar.
 - Ekran görüntüsü: `adb shell screencap -p /sdcard/x.png` + `adb pull` (PowerShell'de `exec-out ... >` ikili dosyayı bozar).
 - Ayarları değiştirmek için (yalnızca debug sürümde): `adb shell run-as app.pano.launcher ...` ile `shared_prefs/pano_style.xml`.
 - Emülatör yavaş: kare süresi ~28 ms civarında takılıyor ve bu uygulamadan kaynaklanmıyor. Performansı gerçek cihazda değerlendir.
