@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioManager
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -58,6 +59,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
@@ -66,6 +68,11 @@ import app.pano.launcher.media.MediaHub
 import app.pano.launcher.navigation.NavHub
 import app.pano.launcher.navigation.NavPhase
 import app.pano.launcher.navigation.PanoNav
+import app.pano.launcher.navigation.Place
+import app.pano.launcher.navigation.RouteEngine
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import app.pano.launcher.navigation.formatDistance
 import app.pano.launcher.settings.LocalStyle
 import app.pano.launcher.ui.theme.Accent
@@ -103,6 +110,9 @@ private const val UfukMotionMs = 240
 
 /** Araç sütununun genişliği (tasarım tuvalinde). */
 private val CarColumnWidth = 500.dp
+
+/** Sürüşte ya da yönlendirmede daralan araç sütunu: harita büyür, araç kontrolleri gizlenir. */
+private val CarColumnCompactWidth = 400.dp
 
 /** Rota önizlemesinde "Nereye?" kartının kapladığı harita oranı (sağdan). */
 private const val NavNarrowInset = 0.56f
@@ -151,12 +161,19 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
                     // Rota seçilince "Nereye?" kartı haritanın sağ yarısına çekilir; rota sol yarıda görünür.
                     val navSession by PanoNav.state.collectAsState()
                     val navNarrow = panel == UfukPanel.Nav && navSession != null
+                    // Sürüşte ya da yönlendirmede sütun daralır; harita yer kazanır.
+                    val driving by VehicleHub.isDriving.collectAsState()
+                    val navActive = navSession?.let { it.phase != NavPhase.Preview && it.route != null } == true
+                    val compact = driving || navActive
+                    val columnWidth by animateDpAsState(
+                        if (compact) CarColumnCompactWidth else CarColumnWidth, tween(UfukMotionMs * 2), label = "araç-sütunu",
+                    )
                     Row(Modifier.fillMaxSize()) {
-                        CarColumn(Modifier.width(CarColumnWidth).fillMaxHeight())
+                        CarColumn(compact, Modifier.width(columnWidth).fillMaxHeight())
                         MapCanvas(Modifier.weight(1f).fillMaxHeight(), endInset = if (navNarrow) NavNarrowInset else 0f)
                     }
                     // Kartlar haritanın üstünde açılır; klima geniş olduğu için araç sütununu da örter.
-                    PanelHost(panel, navNarrow, climate, onNavigate, onClose = ::closePanel)
+                    PanelHost(panel, navNarrow, columnWidth, climate, onNavigate, onClose = ::closePanel)
                 }
                 BottomBar(climate, screen, panel, onNavigate, Modifier.fillMaxWidth().height(BarHeight))
             }
@@ -167,7 +184,7 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
 // ───────────────────────── Araç sütunu ─────────────────────────
 
 @Composable
-private fun CarColumn(modifier: Modifier) {
+private fun CarColumn(compact: Boolean, modifier: Modifier) {
     val c = LocalPano.current
     val context = LocalContext.current
     val v by VehicleHub.state.collectAsState()
@@ -246,7 +263,7 @@ private fun CarColumn(modifier: Modifier) {
                 fontWeight = FontWeight.Bold, maxLines = 2, modifier = Modifier.padding(bottom = 8.dp),
             )
         }
-        AnimatedVisibility(!locked, enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs))) {
+        AnimatedVisibility(!locked && !compact, enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs))) {
             val notYet = { Launch.notConnectedYet(context) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 CarHotspot(PanoIcons.Trunk, if (v.openings?.trunk == true) "Bagaj açık" else "Bagaj", notYet, Modifier)
@@ -361,6 +378,15 @@ private fun MapCanvas(modifier: Modifier, endInset: Float) {
     Box(modifier.background(if (c.isDark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
         LiveMap(Modifier.fillMaxSize(), dark = c.isDark, showLocation = granted, bottomInset = 0f, endInset = endInset, interactive = true)
         val controls = rememberMapControls()
+        // Yönlendirmede hıza göre yakınlık: şehir içinde yakın, otoyolda daha geniş görüş.
+        val speed = VehicleHub.state.collectAsState().value.speedKmh
+        val speedZoom = when {
+            speed == null || speed < 30 -> 16.5
+            speed < 60 -> 16.0
+            speed < 90 -> 15.2
+            else -> 14.4
+        }
+        LaunchedEffect(speedZoom, session != null) { if (session != null) controls.setTrackingZoom(speedZoom) }
         // Yönlendirmede harita elle kaydırıldıysa bir süre dokunulmayınca araca geri döner.
         val free = controls.isFree
         LaunchedEffect(free, session != null) {
@@ -409,6 +435,9 @@ private fun MapCanvas(modifier: Modifier, endInset: Float) {
         // Üst sağ: saat ve dış hava. Sistem durum çubuğu yerine.
         ClockWeather(Modifier.align(Alignment.TopEnd).padding(end = 24.dp, top = 24.dp))
 
+        // Uzun basılan nokta: iğne ve "Buraya git" kartı.
+        PressedPlace(controls, session == null, Modifier.align(Alignment.BottomStart).padding(start = 24.dp, bottom = 24.dp).width(600.dp))
+
         // Sağ alt: yakınlaştır / uzaklaştır ve elle kaydırılınca "Ortala".
         MapButtons(controls, Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 24.dp))
         // OpenStreetMap lisansı gereği atıf görünür kalmalı.
@@ -439,6 +468,67 @@ private fun ClockWeather(modifier: Modifier) {
             Text("${Math.round(w.temperatureC)}°", color = c.text, fontSize = 26.sp, fontWeight = FontWeight.Medium)
             Text(w.description, color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(start = 10.dp))
         }
+    }
+}
+
+/**
+ * Haritada uzun basılan yer: noktada küçük bir iğne, altta adı (Photon ters arama) ve
+ * "Buraya git". Yönlendirme sürerken kart gösterilmez (alttaki varış çubuğuyla çakışmasın).
+ */
+@Composable
+private fun BoxScope.PressedPlace(controls: MapControls, allowCard: Boolean, cardModifier: Modifier) {
+    val c = LocalPano.current
+    val context = LocalContext.current
+    val point = controls.pressed ?: return
+    var place by remember(point) { mutableStateOf<Place?>(null) }
+    var loading by remember(point) { mutableStateOf(true) }
+    LaunchedEffect(point) {
+        place = RouteEngine.reverse(point.latitude, point.longitude)
+        loading = false
+    }
+
+    // İğne: kamera kaydıkça yeri güncellenir.
+    val screen = controls.screenPosition(point)
+    if (screen != null) {
+        val half = with(LocalDensity.current) { 14.dp.toPx() }
+        Box(
+            Modifier.offset { IntOffset((screen.x - half).toInt(), (screen.y - half).toInt()) }
+                .size(28.dp).clip(CircleShape).background(Color.White).padding(4.dp).clip(CircleShape).background(Accent.Red),
+        )
+    }
+    if (!allowCard) return
+
+    val coords = String.format(trLocale, "%.5f, %.5f", point.latitude, point.longitude)
+    val target = place ?: Place("Seçilen yer", coords, point.latitude, point.longitude)
+    Row(
+        Modifier.align(Alignment.BottomStart).then(cardModifier).height(96.dp).clip(RoundedCornerShape(28.dp)).background(c.glass)
+            .border(1.dp, c.hairline, RoundedCornerShape(28.dp)).padding(start = 22.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(PanoIcons.Pin, contentDescription = null, tint = c.text, modifier = Modifier.size(28.dp))
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(
+                if (loading) "Aranıyor…" else target.name, color = c.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                target.detail.ifBlank { coords }, color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box(
+            Modifier.padding(start = 12.dp).height(72.dp).clip(RoundedCornerShape(36.dp)).background(c.text)
+                .clickable(role = Role.Button) {
+                    PanoNav.preview(context, target)
+                    AppSheet.openNav()
+                    controls.clearPressed()
+                }
+                .padding(horizontal = 28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Buraya git", color = c.inverseText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        }
+        RoundIconButton(PanoIcons.Close, "Kapat", { controls.clearPressed() }, Color.Transparent, c.secondary, size = 72.dp, iconSize = 24.dp)
     }
 }
 
@@ -475,7 +565,7 @@ private fun MapButtons(controls: MapControls, modifier: Modifier) {
 // ───────────────────────── Harita üstü kart ─────────────────────────
 
 @Composable
-private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, climate: ClimateState, onNavigate: (Screen) -> Unit, onClose: () -> Unit) {
+private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, columnWidth: Dp, climate: ClimateState, onNavigate: (Screen) -> Unit, onClose: () -> Unit) {
     val c = LocalPano.current
     var shown by remember { mutableStateOf<UfukPanel?>(null) }
     if (panel != null) shown = panel
@@ -492,8 +582,8 @@ private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, climate: C
                 .padding(
                     start = when {
                         p == UfukPanel.Climate -> 0.dp
-                        navNarrow -> CarColumnWidth + (1600.dp - CarColumnWidth) * (1f - NavNarrowInset)
-                        else -> CarColumnWidth
+                        navNarrow -> columnWidth + (1600.dp - columnWidth) * (1f - NavNarrowInset)
+                        else -> columnWidth
                     },
                 )
                 .padding(16.dp).clip(shape).background(c.card).border(1.dp, c.hairline, shape),
