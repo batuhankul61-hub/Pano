@@ -352,7 +352,16 @@ private fun MapCanvas(modifier: Modifier, endInset: Float) {
     val external by NavHub.state.collectAsState()
 
     Box(modifier.background(if (c.isDark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
-        LiveMap(Modifier.fillMaxSize(), dark = c.isDark, showLocation = granted, bottomInset = 0f, endInset = endInset)
+        LiveMap(Modifier.fillMaxSize(), dark = c.isDark, showLocation = granted, bottomInset = 0f, endInset = endInset, interactive = true)
+        val controls = rememberMapControls()
+        // Yönlendirmede harita elle kaydırıldıysa bir süre dokunulmayınca araca geri döner.
+        val free = controls.isFree
+        LaunchedEffect(free, session != null) {
+            if (free && session != null) {
+                delay(AutoRecenterMs)
+                controls.recenter()
+            }
+        }
 
         // Üst sol: arama ya da sıradaki manevra.
         val top = Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 24.dp).width(560.dp)
@@ -392,19 +401,8 @@ private fun MapCanvas(modifier: Modifier, endInset: Float) {
         // Üst sağ: saat ve dış hava. Sistem durum çubuğu yerine.
         ClockWeather(Modifier.align(Alignment.TopEnd).padding(end = 24.dp, top = 24.dp))
 
-        // Harita uygulamasını tam ekran açmak için; harita dokunmayla kaymadığı için tek giriş noktası.
-        if (session == null && step == null) {
-            Box(
-                Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 24.dp).size(72.dp).clip(CircleShape)
-                    .background(c.glass).border(1.dp, c.hairline, CircleShape)
-                    .clickable(role = Role.Button) { Launch.maps(context) }
-                    .semantics { contentDescription = "Harita uygulamasını aç" },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(PanoIcons.Navigation, contentDescription = null, tint = c.text, modifier = Modifier.size(28.dp))
-            }
-        }
-
+        // Sağ alt: yakınlaştır / uzaklaştır ve elle kaydırılınca "Ortala".
+        MapButtons(controls, Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 24.dp))
         // OpenStreetMap lisansı gereği atıf görünür kalmalı.
         Text(
             "© OpenFreeMap © OpenMapTiles © OpenStreetMap",
@@ -432,6 +430,36 @@ private fun ClockWeather(modifier: Modifier) {
             Box(Modifier.padding(horizontal = 16.dp).width(1.dp).height(28.dp).background(c.hairline))
             Text("${Math.round(w.temperatureC)}°", color = c.text, fontSize = 26.sp, fontWeight = FontWeight.Medium)
             Text(w.description, color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(start = 10.dp))
+        }
+    }
+}
+
+/** Yönlendirmede elle kaydırılan harita bu kadar süre sonra araca döner. */
+private const val AutoRecenterMs = 12_000L
+
+@Composable
+private fun MapButtons(controls: MapControls, modifier: Modifier) {
+    val c = LocalPano.current
+    Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.width(72.dp).clip(RoundedCornerShape(36.dp)).background(c.glass)
+                .border(1.dp, c.hairline, RoundedCornerShape(36.dp)),
+        ) {
+            RoundIconButton(PanoIcons.Plus, "Yakınlaştır", { controls.zoomIn() }, Color.Transparent, c.text, size = 72.dp, iconSize = 28.dp)
+            Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(1.dp).background(c.hairline))
+            RoundIconButton(PanoIcons.Minus, "Uzaklaştır", { controls.zoomOut() }, Color.Transparent, c.text, size = 72.dp, iconSize = 28.dp)
+        }
+        AnimatedVisibility(controls.isFree, enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs))) {
+            Row(
+                Modifier.height(72.dp).clip(RoundedCornerShape(36.dp)).background(c.text)
+                    .clickable(role = Role.Button) { controls.recenter() }
+                    .semantics { contentDescription = "Haritayı araca ortala" }
+                    .padding(start = 20.dp, end = 24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(PanoIcons.Location, contentDescription = null, tint = c.inverseText, modifier = Modifier.size(26.dp))
+                Text("Ortala", color = c.inverseText, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 10.dp))
+            }
         }
     }
 }
