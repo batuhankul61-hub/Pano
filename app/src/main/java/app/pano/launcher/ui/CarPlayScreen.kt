@@ -82,11 +82,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
 import app.pano.launcher.settings.DockStore
 import app.pano.launcher.settings.LocalStyle
+import app.pano.launcher.navigation.Lane
+import app.pano.launcher.navigation.LaneTurn
 import app.pano.launcher.navigation.NavPhase
 import app.pano.launcher.navigation.NavSession
 import app.pano.launcher.navigation.PanoNav
@@ -922,6 +925,7 @@ private fun MapWidget(modifier: Modifier) {
                 title = if (arrived) "Vardınız: ${session.destination.name}" else m.instruction,
                 eta = if (session.rerouting) "Rota yeniden hesaplanıyor…" else null,
                 vector = if (arrived) PanoIcons.Flag else maneuverIcon(m.type),
+                lanes = if (arrived) null else p?.lanes,
                 modifier = Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth(),
             ) { AppSheet.openNav() }
             NavBottomBar(session, Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 40.dp).fillMaxWidth())
@@ -978,6 +982,8 @@ internal fun ManeuverCard(
     modifier: Modifier,
     bitmap: android.graphics.Bitmap? = null,
     vector: ImageVector? = null,
+    /** Yaklaşılan kavşağın şeritleri; null ya da boşsa hiçbir şey çizilmez. */
+    lanes: List<Lane>? = null,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(26.dp)
@@ -1009,6 +1015,58 @@ internal fun ManeuverCard(
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp),
             )
         }
+        if (!lanes.isNullOrEmpty()) LaneStrip(lanes, Modifier.padding(top = 12.dp))
+    }
+}
+
+/** Şerit okları: kullanılacak şeritler beyaz, diğerleri soluk; aralarında ince ayraç. */
+@Composable
+private fun LaneStrip(lanes: List<Lane>, modifier: Modifier) {
+    Row(
+        modifier.clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(alpha = 0.2f))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        lanes.forEachIndexed { i, lane ->
+            if (i > 0) Box(Modifier.width(1.dp).height(28.dp).background(Color.White.copy(alpha = 0.25f)))
+            Icon(
+                laneIcon(lane.turn), contentDescription = null,
+                tint = if (lane.active) Color.White else Color.White.copy(alpha = 0.3f),
+                modifier = Modifier.padding(horizontal = 6.dp).size(34.dp),
+            )
+        }
+    }
+}
+
+private fun laneIcon(turn: LaneTurn): ImageVector = when (turn) {
+    LaneTurn.Straight -> PanoIcons.Straight
+    LaneTurn.SlightRight -> PanoIcons.SlightRight
+    LaneTurn.Right, LaneTurn.SharpRight -> PanoIcons.TurnRight
+    LaneTurn.SlightLeft -> PanoIcons.SlightLeft
+    LaneTurn.Left, LaneTurn.SharpLeft -> PanoIcons.TurnLeft
+    LaneTurn.UTurn -> PanoIcons.UTurn
+}
+
+/** Yönlendirme sürerken aracın bulunduğu kesimin hız sınırı (km/sa); bilinmiyorsa null. */
+@Composable
+internal fun navSpeedLimit(): Int? {
+    val s by PanoNav.state.collectAsState()
+    return s?.takeIf { it.phase == NavPhase.Active }?.progress?.speedLimitKmh
+}
+
+/** Hız sınırı levhası: beyaz zemin, kırmızı kenar, siyah sayı. */
+@Composable
+internal fun SpeedLimitSign(kmh: Int, size: Dp, modifier: Modifier = Modifier) {
+    Box(
+        modifier.size(size).clip(CircleShape).background(Color.White)
+            .border(size * 0.11f, Color(0xFFE0262B), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            kmh.toString(), color = Color.Black, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp,
+            fontSize = with(LocalDensity.current) { (size * if (kmh >= 100) 0.34f else 0.42f).toSp() },
+            lineHeight = with(LocalDensity.current) { (size * 0.5f).toSp() },
+        )
     }
 }
 
@@ -1270,8 +1328,12 @@ private fun VehicleWidget(modifier: Modifier) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.Bottom) {
                     // Hız yoksa (BYD veri yolu da GPS de yok) "—": uydurma 0 gösterilmez.
-                    Text(v.speedKmh?.toString() ?: "—", color = c.text, fontSize = 80.sp, fontWeight = FontWeight.Light, letterSpacing = (-3).sp, lineHeight = 80.sp)
+                    // Pano'nun yönlendirmesi hız sınırını biliyorsa levha; sınır aşılınca hız kırmızı.
+                    val limit = navSpeedLimit()
+                    val over = limit != null && (v.speedKmh ?: 0) > limit
+                    Text(v.speedKmh?.toString() ?: "—", color = if (over) Color(0xFFFF453A) else c.text, fontSize = 80.sp, fontWeight = FontWeight.Light, letterSpacing = (-3).sp, lineHeight = 80.sp)
                     Text("km/s", color = c.secondary, fontSize = 20.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 6.dp, bottom = 12.dp))
+                    if (limit != null) SpeedLimitSign(limit, 60.dp, Modifier.padding(start = 14.dp, bottom = 10.dp))
                 }
                 Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     val status = when {

@@ -191,11 +191,14 @@ private fun CarColumn(modifier: Modifier) {
         }
 
         // Hız: sütunun en büyük öğesi. Bilinmiyorsa "—".
-        Row(Modifier.padding(top = 18.dp)) {
+        Row(Modifier.fillMaxWidth().padding(top = 18.dp)) {
             // Hız bilinmiyorsa kısa, soluk bir çizgi (uydurma 0 yok).
             val speed = v.speedKmh
+            // Pano'nun yönlendirmesi hız sınırını biliyorsa levha; aşılınca hız kırmızı. Bilinmiyorsa levha yok.
+            val limit = navSpeedLimit()
+            val over = limit != null && speed != null && speed > limit
             Text(
-                speed?.toString() ?: "–", color = if (speed == null) c.tertiary else c.text, fontSize = 132.sp,
+                speed?.toString() ?: "–", color = when { speed == null -> c.tertiary; over -> Color(0xFFFF453A); else -> c.text }, fontSize = 132.sp,
                 fontWeight = FontWeight.Light, letterSpacing = (-5).sp, lineHeight = 132.sp,
                 modifier = Modifier.alignByBaseline(),
             )
@@ -203,6 +206,10 @@ private fun CarColumn(modifier: Modifier) {
                 "km/sa", color = c.secondary, fontSize = 24.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.alignByBaseline().padding(start = 12.dp),
             )
+            if (limit != null) {
+                Spacer(Modifier.weight(1f))
+                SpeedLimitSign(limit, 92.dp, Modifier.align(Alignment.CenterVertically))
+            }
         }
 
         // Önizleme yalnızca burada, bir kez.
@@ -377,6 +384,7 @@ private fun MapCanvas(modifier: Modifier, endInset: Float) {
                     title = if (arrived) "Vardınız: ${session.destination.name}" else m.instruction,
                     eta = if (session.rerouting) "Rota yeniden hesaplanıyor…" else null,
                     vector = if (arrived) PanoIcons.Flag else maneuverIcon(m.type),
+                    lanes = if (arrived) null else p?.lanes,
                     modifier = top,
                 ) { AppSheet.openNav() }
                 NavBottomBar(session, Modifier.align(Alignment.BottomStart).padding(start = 24.dp, bottom = 24.dp).width(560.dp))

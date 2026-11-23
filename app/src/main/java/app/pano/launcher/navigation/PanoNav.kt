@@ -37,6 +37,10 @@ data class NavProgress(
     val distanceToNextM: Double,
     val remainingM: Double,
     val remainingS: Double,
+    /** Aracın bulunduğu kesimin hız sınırı (km/sa); null = bilinmiyor. */
+    val speedLimitKmh: Int? = null,
+    /** Yaklaşılan kavşağın şeritleri (soldan sağa); null = bilgi yok. */
+    val lanes: List<Lane>? = null,
 )
 
 enum class NavPhase { Preview, Active, Arrived }
@@ -66,6 +70,8 @@ object PanoNav {
     private const val REROUTE_MIN_GAP_MS = 12_000L
     private const val ARRIVE_M = 30.0
     private const val MAX_RECENTS = 6
+    /** Şeritler kavşağa bu kadar kala gösterilmeye başlar (m). */
+    private const val LANES_AHEAD_M = 600.0
 
     private val _state = MutableStateFlow<NavSession?>(null)
     val state: StateFlow<NavSession?> = _state.asStateFlow()
@@ -194,7 +200,18 @@ object PanoNav {
             .let { if (it < 0) route.maneuvers.lastIndex else it }
         val toNext = (route.cumulative[route.maneuvers[next].beginIndex] - along).coerceAtLeast(0.0)
         val remainingS = route.timeS * remaining / route.lengthM.coerceAtLeast(1.0)
-        _state.value = s.copy(progress = NavProgress(next, toNext, remaining, remainingS))
+        val nextAt = route.cumulative[route.maneuvers[next].beginIndex]
+        _state.value = s.copy(
+            progress = NavProgress(
+                next, toNext, remaining, remainingS,
+                // Rotadan uzaktaysa başka bir yoldayız; rotanın sınırı uydurma olur.
+                speedLimitKmh = if (off > OFF_ROUTE_M) null
+                else route.speedLimits.firstOrNull { along >= it.startM && along < it.endM }?.kmh,
+                // Önümüzdeki ilk şeritli kavşak; yakınsa ve sıradaki manevradan önceyse gösterilir.
+                lanes = if (off > OFF_ROUTE_M) null else route.laneGroups.firstOrNull { it.alongM > along - 5 }
+                    ?.takeIf { it.alongM - along <= LANES_AHEAD_M && it.alongM <= nextAt + 20 }?.lanes,
+            ),
+        )
 
         // Sesli uyarılar: önce ~400 m'de haber ver, sonra hıza göre manevradan hemen önce söyle.
         val m = route.maneuvers[next]
