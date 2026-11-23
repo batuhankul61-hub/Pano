@@ -1,7 +1,21 @@
 package app.pano.launcher.ui
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioManager
+import android.os.SystemClock
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
@@ -146,6 +160,8 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
     val sheetOpen = AppSheet.nav || AppSheet.music
     LaunchedEffect(sheetOpen) { if (sheetOpen && screen != Screen.Home) onNavigate(Screen.Home) }
 
+    val volume = rememberUfukVolume()
+
     fun closePanel() {
         AppSheet.close()
         onNavigate(Screen.Home)
@@ -174,8 +190,11 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
                     }
                     // Kartlar haritanın üstünde açılır; klima geniş olduğu için araç sütununu da örter.
                     PanelHost(panel, navNarrow, columnWidth, climate, onNavigate, onClose = ::closePanel)
+                    // Ses göstergesi ses düğmelerinin üstünde; harita düğmeleri (72 dp) ve alttaki
+                    // OpenStreetMap atfı açıkta kalır.
+                    VolumeHud(volume, Modifier.align(Alignment.BottomEnd).padding(end = 112.dp, bottom = 40.dp))
                 }
-                BottomBar(climate, screen, panel, onNavigate, Modifier.fillMaxWidth().height(BarHeight))
+                BottomBar(climate, screen, panel, volume, onNavigate, Modifier.fillMaxWidth().height(BarHeight))
             }
         }
     }
@@ -649,7 +668,7 @@ private fun DrivingGate(title: String, onClose: () -> Unit, content: @Composable
 // ───────────────────────── Alt çubuk ─────────────────────────
 
 @Composable
-private fun BottomBar(climate: ClimateState, screen: Screen, panel: UfukPanel?, onNavigate: (Screen) -> Unit, modifier: Modifier) {
+private fun BottomBar(climate: ClimateState, screen: Screen, panel: UfukPanel?, volume: UfukVolume, onNavigate: (Screen) -> Unit, modifier: Modifier) {
     val c = LocalPano.current
     val context = LocalContext.current
     val playing by MediaHub.state.collectAsState()
@@ -687,7 +706,7 @@ private fun BottomBar(climate: ClimateState, screen: Screen, panel: UfukPanel?, 
             )
         }
         Box(Modifier.padding(horizontal = 12.dp).width(1.dp).height(48.dp).background(c.hairline))
-        VolumeControl()
+        VolumeControl(volume)
     }
 }
 
@@ -731,33 +750,151 @@ private fun BarApp(icon: ImageVector, label: String, active: Boolean = false, di
     }
 }
 
-/** Ses: − / hoparlör (sessize al) / +. Medya ses akışını değiştirir. */
-@Composable
-private fun VolumeControl() {
-    val c = LocalPano.current
-    val context = LocalContext.current
-    val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
-    var level by remember { mutableIntStateOf(audio?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0) }
-    var muted by remember { mutableStateOf(audio?.isStreamMute(AudioManager.STREAM_MUSIC) == true) }
-    fun adjust(direction: Int) {
+/** Ses göstergesi son dokunuştan bu kadar sonra kaybolur. */
+private const val VolumeHudMs = 2_500L
+
+/**
+ * Medya sesinin durumu. Alt çubuktaki düğmeler ve haritanın üstündeki gösterge aynı durumu paylaşır.
+ * Sistem ses paneli açılmaz (FLAG_SHOW_UI yok); yerine Ufuk'un kendi göstergesi çıkar.
+ */
+private class UfukVolume(private val audio: AudioManager?) {
+    val max: Int = (audio?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 1).coerceAtLeast(1)
+    var level by mutableIntStateOf(audio?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0)
+        private set
+    var muted by mutableStateOf(audio?.isStreamMute(AudioManager.STREAM_MUSIC) == true)
+        private set
+    /** Son dokunuşun zamanı; değişince gösterge açılır ve süresi baştan başlar. */
+    var touchedAt by mutableLongStateOf(0L)
+        private set
+
+    /** Ses başka yerden (direksiyon, sistem) değişince değerleri tazeler; göstergeyi açmaz. */
+    fun refresh() {
         val a = audio ?: return
-        runCatching { a.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI) }
         level = a.getStreamVolume(AudioManager.STREAM_MUSIC)
         muted = a.isStreamMute(AudioManager.STREAM_MUSIC)
     }
+
+    fun adjust(direction: Int) {
+        runCatching { audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0) }
+        refresh()
+        touchedAt = SystemClock.uptimeMillis()
+    }
+
+    fun set(value: Int) {
+        val v = value.coerceIn(0, max)
+        if (v != level || muted) {
+            runCatching {
+                if (muted && v > 0) audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+                audio?.setStreamVolume(AudioManager.STREAM_MUSIC, v, 0)
+            }
+            refresh()
+        }
+        touchedAt = SystemClock.uptimeMillis()
+    }
+}
+
+@Composable
+private fun rememberUfukVolume(): UfukVolume {
+    val context = LocalContext.current
+    val volume = remember { UfukVolume(context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager) }
+    // Direksiyondan ya da başka uygulamadan değişen ses de alt çubuğa yansısın.
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) = volume.refresh()
+        }
+        val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION").apply {
+            addAction("android.media.STREAM_MUTE_CHANGED_ACTION")
+        }
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { runCatching { context.unregisterReceiver(receiver) } }
+    }
+    return volume
+}
+
+/** Ses: − / hoparlör (sessize al) / +. Medya ses akışını değiştirir. */
+@Composable
+private fun VolumeControl(volume: UfukVolume) {
+    val c = LocalPano.current
     Row(verticalAlignment = Alignment.CenterVertically) {
-        RoundIconButton(PanoIcons.Minus, "Sesi kıs", { adjust(AudioManager.ADJUST_LOWER) }, Color.Transparent, c.secondary, size = 72.dp, iconSize = 26.dp)
+        RoundIconButton(PanoIcons.Minus, "Sesi kıs", { volume.adjust(AudioManager.ADJUST_LOWER) }, Color.Transparent, c.secondary, size = 72.dp, iconSize = 26.dp)
         Box(
             Modifier.size(72.dp).clip(CircleShape)
-                .clickable(role = Role.Button) { adjust(AudioManager.ADJUST_TOGGLE_MUTE) }
-                .semantics { contentDescription = if (muted) "Sesi aç" else "Sessize al" },
+                .clickable(role = Role.Button) { volume.adjust(AudioManager.ADJUST_TOGGLE_MUTE) }
+                .semantics { contentDescription = if (volume.muted) "Sesi aç" else "Sessize al" },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                if (muted || level == 0) PanoIcons.SpeakerOff else PanoIcons.Speaker, contentDescription = null,
-                tint = if (muted) Accent.Red else c.text, modifier = Modifier.size(30.dp),
+                if (volume.muted || volume.level == 0) PanoIcons.SpeakerOff else PanoIcons.Speaker, contentDescription = null,
+                tint = if (volume.muted) Accent.Red else c.text, modifier = Modifier.size(30.dp),
             )
         }
-        RoundIconButton(PanoIcons.Plus, "Sesi aç", { adjust(AudioManager.ADJUST_RAISE) }, Color.Transparent, c.secondary, size = 72.dp, iconSize = 26.dp)
+        RoundIconButton(PanoIcons.Plus, "Sesi aç", { volume.adjust(AudioManager.ADJUST_RAISE) }, Color.Transparent, c.secondary, size = 72.dp, iconSize = 26.dp)
+    }
+}
+
+/**
+ * Ses göstergesi: haritanın sağ altında, ses düğmelerinin hemen üstünde açılan opak hap.
+ * Hoparlör, sürüklenebilir çubuk ve seviye. Çubuğa dokunmak ya da sürüklemek sesi ayarlar.
+ * Tek renk; yalnızca sessizde kırmızı.
+ */
+@Composable
+private fun VolumeHud(volume: UfukVolume, modifier: Modifier) {
+    val c = LocalPano.current
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(volume.touchedAt) {
+        if (volume.touchedAt == 0L) return@LaunchedEffect
+        visible = true
+        delay(VolumeHudMs)
+        visible = false
+    }
+    AnimatedVisibility(
+        visible,
+        enter = fadeIn(tween(UfukMotionMs / 2)) + slideInVertically(tween(UfukMotionMs)) { it / 3 },
+        exit = fadeOut(tween(UfukMotionMs)) + slideOutVertically(tween(UfukMotionMs)) { it / 3 },
+        modifier = modifier,
+    ) {
+        val silent = volume.muted || volume.level == 0
+        val fraction = if (volume.muted) 0f else volume.level / volume.max.toFloat()
+        val shown by animateFloatAsState(fraction, tween(UfukMotionMs / 2), label = "ses-seviyesi")
+        val shape = RoundedCornerShape(44.dp)
+        Row(
+            Modifier.height(88.dp).clip(shape).background(c.card).border(1.dp, c.hairline, shape)
+                .padding(start = 26.dp, end = 30.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (silent) PanoIcons.SpeakerOff else PanoIcons.Speaker, contentDescription = null,
+                tint = if (volume.muted) Accent.Red else c.text, modifier = Modifier.size(30.dp),
+            )
+            // Dokunma alanı çubuktan yüksek (88 dp); görünen çubuk ince.
+            BoxWithConstraints(
+                Modifier.padding(horizontal = 22.dp).width(360.dp).fillMaxHeight()
+                    .semantics { contentDescription = "Ses seviyesi" }
+                    .pointerInput(volume.max) {
+                        fun at(x: Float) = volume.set(Math.round(x / size.width * volume.max))
+                        detectTapGestures { at(it.x) }
+                    }
+                    .pointerInput(volume.max) {
+                        fun at(x: Float) = volume.set(Math.round(x / size.width * volume.max))
+                        detectHorizontalDragGestures(onDragStart = { at(it.x) }) { change, _ -> at(change.position.x) }
+                    },
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Box(Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)).background(c.raised)) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(shown).clip(RoundedCornerShape(6.dp)).background(c.text))
+                }
+                // Tutamak: dolu kısmın ucunda.
+                Box(
+                    Modifier.offset(x = (maxWidth - 28.dp) * shown).size(28.dp).clip(CircleShape)
+                        .background(c.text).border(3.dp, c.card, CircleShape),
+                )
+            }
+            Text(
+                if (volume.muted) "Sessiz" else volume.level.toString(),
+                color = if (volume.muted) Accent.Red else c.text,
+                fontSize = if (volume.muted) 22.sp else 30.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.End, maxLines = 1, modifier = Modifier.width(84.dp),
+            )
+        }
     }
 }
