@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,7 +50,11 @@ object SavedPlaces {
 
 /**
  * Yakındaki elektrikli araç şarj istasyonları: OpenStreetMap `amenity=charging_station`.
- * Önce Overpass API (yarıçapla tam liste), olmazsa Photon (kutu içinde "şarj" araması).
+ * İki kaynak aynı anda sorulur ve sonuçlar birleştirilir:
+ *  - Photon `reverse` (konuma göre, etiket süzgeçli): hızlı ve güvenilir ama sonuç sayısı sınırlı.
+ *  - Overpass (yarıçapla tam liste): ortak sunucular sık sık aşırı yüklenir (502/504/406, zaman aşımı).
+ * Eskiden Overpass düşünce Photon'da yalnızca "şarj" kelimesiyle metin araması yapılıyordu; adında
+ * "şarj" geçmeyen istasyonlar (ZES, Sharz, Trugo…) gelmediği için çoğu yerde "bulunamadı" çıkıyordu.
  * Yalnızca OSM'deki ad, işletmeci ve adres kullanılır; hız ya da müsaitlik bilgisi yok.
  */
 object ChargerSearch {
@@ -59,23 +65,27 @@ object ChargerSearch {
         "https://overpass-api.de/api/interpreter",
         "https://overpass.private.coffee/api/interpreter",
     )
-    private const val PHOTON = "https://photon.komoot.io/api/"
+    private const val PHOTON = "https://photon.komoot.io"
     private const val MAX = 25
 
-    /** [lat]/[lon] çevresindeki istasyonlar, yakından uzağa. Hata olursa null (boş liste = bulunamadı). */
-    suspend fun near(lat: Double, lon: Double): List<Place>? = withContext(Dispatchers.IO) {
-        val overpass = runCatching {
-            val first = overpass(lat, lon, 10_000)
-            if (first.size >= 3) first else runCatching { overpass(lat, lon, 30_000) }.getOrDefault(first)
-        }.onFailure { Log.w(TAG, "overpass: $it") }.getOrNull()
-        val list = if (overpass.isNullOrEmpty()) {
-            runCatching { photon(lat, lon) }.onFailure { Log.w(TAG, "photon: $it") }.getOrNull() ?: overpass
-        } else overpass
-        list?.sortedBy { distanceM(lat, lon, it.lat, it.lon) }?.take(MAX)
+    /** [lat]/[lon] çevresindeki istasyonlar, yakından uzağa. İki kaynak da hata verirse null (boş liste = bulunamadı). */
+    suspend fun near(lat: Double, lon: Double): List<Place>? = coroutineScope {
+        val photon = async(Dispatchers.IO) {
+            runCatching { photon(lat, lon) }.onFailure { Log.w(TAG, "photon: $it") }.getOrNull()
+        }
+        val overpass = async(Dispatchers.IO) {
+            runCatching { overpass(lat, lon, 15_000) }.onFailure { Log.w(TAG, "overpass: $it") }.getOrNull()
+        }
+        val lists = listOfNotNull(overpass.await(), photon.await())
+        if (lists.isEmpty()) return@coroutineScope null
+        // Aynı istasyon iki kaynaktan da gelebilir; ~40 m içindekiler tek sayılır (Overpass'ınki kalır).
+        val merged = mutableListOf<Place>()
+        lists.flatten().forEach { p -> if (merged.none { distanceM(it.lat, it.lon, p.lat, p.lon) < 40 }) merged += p }
+        merged.sortedBy { distanceM(lat, lon, it.lat, it.lon) }.take(MAX)
     }
 
     private fun overpass(lat: Double, lon: Double, radiusM: Int): List<Place> {
-        val q = "[out:json][timeout:10];nwr[\"amenity\"=\"charging_station\"](around:$radiusM,$lat,$lon);out center tags 60;"
+        val q = "[out:json][timeout:8];nwr[\"amenity\"=\"charging_station\"](around:$radiusM,$lat,$lon);out center tags 60;"
         val body = "data=" + URLEncoder.encode(q, "UTF-8")
         var last: Throwable? = null
         val text = OVERPASS.firstNotNullOfOrNull { url ->
@@ -102,21 +112,36 @@ object ChargerSearch {
         }
     }
 
+    /**
+     * Photon: konuma göre arama (`reverse`, 15 km; azsa 50 km) + "şarj" metin araması.
+     * Hepsi hata verirse istisna fırlatır; biri bile yanıt verirse sonuç sayılır.
+     */
     private fun photon(lat: Double, lon: Double): List<Place> {
+        val tag = "osm_tag=amenity:charging_station"
         val d = 0.15 // ~15 km'lik kutu
         val bbox = "${lon - d},${lat - d},${lon + d},${lat + d}"
-        return listOf("şarj", "charging").flatMap { q ->
-            val json = JSONObject(get("$PHOTON?q=${URLEncoder.encode(q, "UTF-8")}&osm_tag=amenity:charging_station&bbox=$bbox&limit=$MAX"))
-            val f = json.getJSONArray("features")
-            (0 until f.length()).mapNotNull { i ->
-                val o = f.getJSONObject(i)
-                val p = o.getJSONObject("properties")
-                val c = o.getJSONObject("geometry").getJSONArray("coordinates")
-                val street = listOfNotNull(p.str("street"), p.str("housenumber")).joinToString(" ").ifBlank { null }
-                val detail = listOfNotNull(street, p.str("district"), p.str("city")).distinct().joinToString(", ")
-                Place(p.str("name") ?: "Şarj istasyonu", detail, c.getDouble(1), c.getDouble(0))
-            }
-        }.distinctBy { "${it.name}|${it.lat}|${it.lon}" }
+        var last: Throwable? = null
+        fun fetch(url: String): List<Place>? =
+            runCatching { parsePhoton(get(url)) }.onFailure { last = it; Log.w(TAG, "photon $url: $it") }.getOrNull()
+
+        val near = fetch("$PHOTON/reverse?lat=$lat&lon=$lon&$tag&radius=15&limit=50")
+        val wide = if ((near?.size ?: 0) < 5) fetch("$PHOTON/reverse?lat=$lat&lon=$lon&$tag&radius=50&limit=50") else null
+        val text = fetch("$PHOTON/api/?q=${URLEncoder.encode("şarj", "UTF-8")}&$tag&bbox=$bbox&limit=$MAX")
+        val all = listOfNotNull(near, wide, text)
+        if (all.isEmpty()) throw (last ?: IllegalStateException("photon"))
+        return all.flatten().distinctBy { "${it.name}|${it.lat}|${it.lon}" }
+    }
+
+    private fun parsePhoton(text: String): List<Place> {
+        val f = JSONObject(text).getJSONArray("features")
+        return (0 until f.length()).mapNotNull { i ->
+            val o = f.getJSONObject(i)
+            val p = o.getJSONObject("properties")
+            val c = o.optJSONObject("geometry")?.optJSONArray("coordinates") ?: return@mapNotNull null
+            val street = listOfNotNull(p.str("street"), p.str("housenumber")).joinToString(" ").ifBlank { null }
+            val detail = listOfNotNull(street, p.str("district"), p.str("city")).distinct().joinToString(", ")
+            Place(p.str("name") ?: "Şarj istasyonu", detail, c.getDouble(1), c.getDouble(0))
+        }
     }
 
     private fun JSONObject.str(k: String): String? = optString(k, "").trim().ifEmpty { null }
@@ -127,8 +152,8 @@ object ChargerSearch {
     private fun request(url: String, body: String?): String {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
-            conn.connectTimeout = 8_000
-            conn.readTimeout = 12_000
+            conn.connectTimeout = 6_000
+            conn.readTimeout = 10_000
             conn.setRequestProperty("User-Agent", USER_AGENT)
             if (body != null) {
                 conn.requestMethod = "POST"
