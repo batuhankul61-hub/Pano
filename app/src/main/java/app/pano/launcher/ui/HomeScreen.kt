@@ -262,6 +262,17 @@ private fun ConsumptionMini(modifier: Modifier) {
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
             BigNumber(vehicle.consumptionKwh100?.let(::decimal) ?: "—", size = 52.sp, weight = FontWeight.Light)
         }
-        Text("kWh / 100 km", color = colors.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        // Değerin hangi pencereye ait olduğu; araç bağlı değilken örnek değer açıkça "Önizleme".
+        val scope = when {
+            vehicle.isPreview -> "Önizleme"
+            vehicle.consumption?.recentWindow == true -> "Son 50 km"
+            vehicle.consumption != null -> "Ortalama"
+            else -> null
+        }
+        Text(
+            if (scope != null) "kWh / 100 km · $scope" else "kWh / 100 km",
+            color = colors.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
     }
 }

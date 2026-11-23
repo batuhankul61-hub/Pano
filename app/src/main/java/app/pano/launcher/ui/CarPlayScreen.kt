@@ -74,6 +74,9 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layoutId
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -1853,25 +1856,57 @@ private fun ClimateStrip(climate: ClimateState, onNavigate: (Screen) -> Unit, mo
     DockStore.load(context)
     val selected by DockStore.state
 
-    BoxWithConstraints(
-        modifier.glass(c, RoundedCornerShape(30.dp)).longPressAnywhere { DockEditing.open = true },
-        contentAlignment = Alignment.Center,
-    ) {
-        val minWidth = maxWidth
-        // Çok kontrol seçilirse şerit yana kaydırılır; azsa ortalanır.
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
-            Row(
-                Modifier.widthIn(min = minWidth).padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-            ) {
-                DockControl.entries.filter { it in selected }.forEach { control ->
-                    DockItemView(control, climate, onNavigate)
-                }
+    val controls = DockControl.entries.filter { it in selected }
+    // Öğeler ortalanır, aralarında 12 dp boşluk olur. Sığmazsa önce boşluk 6 dp'ye iner, yine
+    // sığmazsa en az önemli öğeler ([DockHideOrder]) tek tek gizlenir; şerit kaydırılmaz.
+    Layout(
+        content = {
+            controls.forEach { control ->
+                Box(Modifier.layoutId(control)) { DockItemView(control, climate, onNavigate) }
+            }
+        },
+        modifier = modifier.glass(c, RoundedCornerShape(30.dp))
+            .longPressAnywhere { DockEditing.open = true }
+            .padding(horizontal = 16.dp),
+    ) { measurables, constraints ->
+        val loose = Constraints(maxHeight = constraints.maxHeight)
+        // Çift bölge kapalıyken yolcu sürgüsü gibi boş kalan öğeler sayılmaz.
+        val items = measurables.map { (it.layoutId as DockControl) to it.measure(loose) }
+            .filter { it.second.width > 0 }
+            .toMutableList()
+        val gapMax = 12.dp.roundToPx()
+        val gapMin = 6.dp.roundToPx()
+        val available = constraints.maxWidth
+        fun widths() = items.sumOf { it.second.width }
+        fun gaps() = (items.size - 1).coerceAtLeast(0)
+        while (items.size > 1 && widths() + gapMin * gaps() > available) {
+            items.remove(items.minBy { dockHideRank(it.first) })
+        }
+        val gap = if (gaps() > 0) ((available - widths()) / gaps()).coerceIn(gapMin, gapMax) else 0
+        val total = widths() + gap * gaps()
+        val height = if (constraints.hasBoundedHeight) constraints.maxHeight else items.maxOfOrNull { it.second.height } ?: 0
+        layout(available, height) {
+            var x = ((available - total) / 2).coerceAtLeast(0)
+            items.forEach { (_, p) ->
+                p.placeRelative(x, (height - p.height) / 2)
+                x += p.width + gap
             }
         }
     }
 }
+
+/** Şerit sığmadığında gizlenme sırası: baştakiler önce gider. Listede olmayanlar en son gizlenir. */
+private val DockHideOrder = listOf(
+    DockControl.Rotate, DockControl.CarSettings, DockControl.PanoSettings, DockControl.Recents,
+    DockControl.Split, DockControl.Voice, DockControl.Phone, DockControl.ClimateDetail,
+    DockControl.RearDefrost, DockControl.Recirculation, DockControl.Power, DockControl.Defrost,
+    DockControl.Apps, DockControl.Music, DockControl.Navigation, DockControl.PanoAssistant,
+    DockControl.Auto, DockControl.AC, DockControl.PassengerTemperature, DockControl.Fan,
+    DockControl.Back, DockControl.Home, DockControl.Temperature,
+)
+
+private fun dockHideRank(control: DockControl): Int =
+    DockHideOrder.indexOf(control).let { if (it < 0) Int.MAX_VALUE else it }
 
 @Composable
 private fun DockItemView(control: DockControl, climate: ClimateState, onNavigate: (Screen) -> Unit) {
