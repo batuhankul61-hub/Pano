@@ -1544,7 +1544,7 @@ private fun VehicleWidget(modifier: Modifier) {
                 GlassAction(
                     if (locked == false) PanoIcons.Unlock else PanoIcons.Lock,
                     when (locked) { true -> "Kilitli"; false -> "Açık"; null -> "Kilit" },
-                    notYet,
+                    { app.pano.launcher.vehicle.VehicleControls.toggleLock(context) },
                 )
                 GlassAction(PanoIcons.Trunk, if (v.openings?.trunk == true) "Bagaj açık" else "Bagaj", notYet)
                 GlassAction(PanoIcons.Bolt, "Şarj", notYet)

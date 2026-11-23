@@ -238,6 +238,8 @@ object VehicleHub {
             regen = runCatching { BydDrive.regen() }.getOrNull(),
             // Kapı açılınca hemen görünsün diye her turda okunur.
             openings = runCatching { BydSignals.openings() }.getOrNull(),
+            // Kapı kilitleri (sürücü kapısı dahil hepsi); okunamazsa null.
+            locked = runCatching { VehicleControls.lockedState() }.getOrNull(),
         )
     }
 

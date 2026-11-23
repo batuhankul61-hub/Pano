@@ -168,7 +168,11 @@ private fun VehicleCard(modifier: Modifier) {
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             val notYet = { Launch.notConnectedYet(context) }
-            VehicleAction(if (locked == false) PanoIcons.Lock else PanoIcons.Unlock, if (locked == false) "Kilitle" else "Kilidi aç", notYet)
+            VehicleAction(
+                if (locked == false) PanoIcons.Lock else PanoIcons.Unlock,
+                when (locked) { true -> "Kilidi aç"; false -> "Kilitle"; null -> "Kilit" },
+                { app.pano.launcher.vehicle.VehicleControls.toggleLock(context) },
+            )
             VehicleAction(PanoIcons.Trunk, "Bagaj", notYet)
             VehicleAction(PanoIcons.Bolt, "Şarj portu", notYet)
             VehicleAction(PanoIcons.Mirror, "Aynalar", notYet)

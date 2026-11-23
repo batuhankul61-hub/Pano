@@ -270,7 +270,7 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
                 CarHotspot(
                     if (v.locked == false) PanoIcons.Unlock else PanoIcons.Lock,
                     when (v.locked) { true -> "Kilitli"; false -> "Açık"; null -> "Kilit" },
-                    notYet, Modifier,
+                    { app.pano.launcher.vehicle.VehicleControls.toggleLock(context) }, Modifier,
                 )
                 CarHotspot(PanoIcons.Bolt, "Şarj", notYet, Modifier)
             }

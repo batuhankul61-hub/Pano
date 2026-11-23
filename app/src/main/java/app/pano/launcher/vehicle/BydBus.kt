@@ -121,6 +121,19 @@ internal object BydBus {
             .also { Log.i(TAG, "yazma tür=$deviceType kimlik=0x${Integer.toHexString(featureId)} değer=$value → $it") }
     }
 
+    /**
+     * Belirli bir cihaz türüyle okuma. Bazı sinyaller (ör. kapı kilidi, tür 1041) genel türle (0)
+     * okununca boş döner; BYD'nin kendi cihaz sınıfı gibi kendi türüyle okunmalı.
+     */
+    fun readFor(deviceType: Int, group: String, field: String): Int? {
+        val target = manager ?: return null
+        val id = featureId(group, field) ?: return null
+        return runCatching { getInt?.invoke(target, deviceType, id) as? Int }
+            .onFailure { Log.w(TAG, "okuma $group.$field (tür $deviceType): ${it.cause ?: it}") }
+            .getOrNull()
+            ?.takeIf { it != UNAVAILABLE && it != NOT_FITTED }
+    }
+
     /** Ham kimlikle okuma (adı bilinmeyen sinyaller için). */
     fun readRaw(featureId: Int): Int? {
         val target = manager ?: return null
