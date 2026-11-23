@@ -60,6 +60,7 @@ import app.pano.launcher.settings.MapStyle
 import app.pano.launcher.settings.Settings
 import app.pano.launcher.settings.ThemeMode
 import app.pano.launcher.ui.theme.Accent
+import app.pano.launcher.ui.theme.LocalAutoTheme
 import app.pano.launcher.ui.theme.LocalPano
 
 private val VERSION get() = "${app.pano.launcher.update.Updater.currentName} (${app.pano.launcher.update.Updater.currentCode})"
@@ -149,7 +150,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                             }, Modifier.width(440.dp))
                         }
                         Divider()
-                        OptionRow("Tema") {
+                        OptionRow("Tema", if (style.theme == ThemeMode.Auto) LocalAutoTheme.current.reason else null) {
                             Segmented(ThemeMode.entries.map { it.label }, style.theme.ordinal, { i ->
                                 Settings.update { it.copy(theme = ThemeMode.entries[i]) }
                             }, Modifier.width(440.dp))
@@ -353,14 +354,20 @@ private fun DriveCommandRows() {
 }
 
 @Composable
-private fun OptionRow(title: String, control: @Composable () -> Unit) {
+private fun OptionRow(title: String, subtitle: String? = null, control: @Composable () -> Unit) {
     val colors = LocalPano.current
     Row(
         Modifier.fillMaxWidth().height(84.dp).padding(horizontal = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Etiket sabit genişlikte; kontrol kalan alana sığar (sağ ekran gibi dar alanlarda ezilmez).
-        Text(title, color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.width(130.dp))
+        Column(Modifier.width(130.dp)) {
+            Text(title, color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            // Örn. otomatik temanın neye göre karar verdiği ("Gün batımı 17:12").
+            if (!subtitle.isNullOrEmpty()) {
+                Text(subtitle, color = colors.secondary, fontSize = 14.sp, lineHeight = 18.sp, maxLines = 2, modifier = Modifier.padding(top = 2.dp))
+            }
+        }
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { control() }
     }
 }

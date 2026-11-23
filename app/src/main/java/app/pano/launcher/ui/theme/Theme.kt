@@ -1,6 +1,5 @@
 package app.pano.launcher.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -84,14 +83,15 @@ val LocalPano = staticCompositionLocalOf { LightPano }
 
 @Composable
 fun PanoTheme(style: StyleSettings, content: @Composable () -> Unit) {
+    val auto = rememberAutoTheme()
     val dark = when (style.theme) {
-        ThemeMode.Auto -> isSystemInDarkTheme()
+        ThemeMode.Auto -> auto.dark
         ThemeMode.Light -> false
         ThemeMode.Dark -> true
     }
     val colors = if (dark) DarkPano else LightPano
     val font = if (style.font == FontChoice.Inter) Inter else FontFamily.Default
-    CompositionLocalProvider(LocalPano provides colors, LocalStyle provides style) {
+    CompositionLocalProvider(LocalPano provides colors, LocalStyle provides style, LocalAutoTheme provides auto) {
         MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
             CompositionLocalProvider(LocalTextStyle provides TextStyle(fontFamily = font, color = colors.text)) {
                 content()
