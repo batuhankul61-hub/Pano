@@ -204,6 +204,7 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
 
 // ───────────────────────── Araç sütunu ─────────────────────────
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun CarColumn(compact: Boolean, modifier: Modifier) {
     val c = LocalPano.current
@@ -264,7 +265,12 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
             v.consumption?.takeIf { !v.isPreview }?.let { "${decimal(it.kwh100)} kWh/100 km" },
         )
         if (chips.isNotEmpty()) {
-            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Dar sütunda (sürüş) üçü tek satıra sığmıyor, tüketim kesiliyordu; sığmayan alt satıra iner.
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 chips.forEach { label ->
                     Text(
                         label, color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
@@ -274,14 +280,15 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
             }
         }
 
-        // Kilit/bagaj/şarj düğmeleri araçta komut almadığı için kaldırıldı. Yerlerinde açıklık
-        // durumu için sabit yükseklikte bir satır var: uyarı gelip gidince araç çizimi kıpırdamaz.
-        Spacer(Modifier.weight(0.25f))
-        OpeningsStatus(v.openings, compact)
+        // Araç görseli ve hemen altında, ona ortalı açıklık durumu (görselin alt yazısı gibi).
+        // Durum satırının yüksekliği sabit: uyarı gelip gidince görsel kıpırdamaz.
+        Spacer(Modifier.weight(0.2f))
         CarIllustration(
-            Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp),
+            Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp),
             dark = c.isDark, background = Color.Transparent,
         )
+        OpeningsStatus(v.openings, compact)
+        Spacer(Modifier.height(12.dp))
         // Müzik yalnızca bir şey çalıyorsa yer kaplar.
         NowPlayingStrip(compact)
     }
@@ -311,19 +318,19 @@ private fun BatteryReadout(percent: Int?, rangeKm: Int?, c: PanoColors) {
 }
 
 /**
- * Araç çiziminin üstündeki durum satırı. Açık kalan her parça kendi renkli etiketinde
+ * Araç görselinin altındaki, ona ortalı durum satırı. Açık kalan her parça kendi renkli etiketinde
  * (kapı/bagaj/kaput kırmızı, cam turuncu); hiçbiri açık değilse sakin bir "kapalı" satırı.
  * Açıklıklar araçtan okunamıyorsa (önizleme) satır boş kalır, uydurma "kapalı" yazılmaz.
- * Yükseklik sabit: içerik değişince araç çizimi yerinden oynamaz.
+ * Yükseklik sabit: içerik değişince araç görseli yerinden oynamaz.
  */
 @Composable
 private fun OpeningsStatus(openings: Openings?, compact: Boolean) {
     val c = LocalPano.current
     val open = openings?.open.orEmpty()
     val known = openings != null && !openings.isEmpty
-    // Dar sütunda iki etiket sığıyor, kalanı sayı olarak.
-    val shown = if (compact) 2 else 3
-    Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.CenterStart) {
+    // Bir etiket ~195 dp: geniş sütuna iki, dar sütuna (sürüş) bir tane sığıyor; kalanı sayı olarak.
+    val shown = if (compact) 1 else 2
+    Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
         AnimatedContent(
             targetState = when { open.isNotEmpty() -> open; known -> emptyList(); else -> null },
             transitionSpec = { fadeIn(tween(UfukMotionMs)) togetherWith fadeOut(tween(UfukMotionMs)) },
