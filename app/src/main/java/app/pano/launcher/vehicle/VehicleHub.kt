@@ -56,7 +56,8 @@ data class TyreAlerts(
 
 /**
  * Gövde açıklıkları (kapılar, bagaj, kaput, camlar, sunroof). Her alan null = bilinmiyor
- * (araçta yok ya da okunamadı). Kapılarda true = açık; camlarda değer açıklık yüzdesidir (0 = kapalı).
+ * (araçta yok ya da okunamadı); true = açık. Atto 2 yolcu camlarını veri yoluna göndermiyor,
+ * orada yalnızca sürücü camı bilinir.
  */
 data class Openings(
     val doorFrontLeft: Boolean? = null,
@@ -65,11 +66,11 @@ data class Openings(
     val doorRearRight: Boolean? = null,
     val trunk: Boolean? = null,
     val hood: Boolean? = null,
-    val windowFrontLeft: Int? = null,
-    val windowFrontRight: Int? = null,
-    val windowRearLeft: Int? = null,
-    val windowRearRight: Int? = null,
-    val sunroof: Int? = null,
+    val windowFrontLeft: Boolean? = null,
+    val windowFrontRight: Boolean? = null,
+    val windowRearLeft: Boolean? = null,
+    val windowRearRight: Boolean? = null,
+    val sunroof: Boolean? = null,
 ) {
     /** Açık olan her şey, önem sırasıyla (kapı/bagaj/kaput önce, camlar sonra). */
     val open: List<Opening>
@@ -80,11 +81,11 @@ data class Openings(
             if (doorRearRight == true) add(Opening("Sağ arka kapı", Opening.Kind.Door))
             if (trunk == true) add(Opening("Bagaj", Opening.Kind.Trunk))
             if (hood == true) add(Opening("Kaput", Opening.Kind.Hood))
-            if ((windowFrontLeft ?: 0) > 0) add(Opening("Sol ön cam", Opening.Kind.Window))
-            if ((windowFrontRight ?: 0) > 0) add(Opening("Sağ ön cam", Opening.Kind.Window))
-            if ((windowRearLeft ?: 0) > 0) add(Opening("Sol arka cam", Opening.Kind.Window))
-            if ((windowRearRight ?: 0) > 0) add(Opening("Sağ arka cam", Opening.Kind.Window))
-            if ((sunroof ?: 0) > 0) add(Opening("Sunroof", Opening.Kind.Window))
+            if (windowFrontLeft == true) add(Opening("Sol ön cam", Opening.Kind.Window))
+            if (windowFrontRight == true) add(Opening("Sağ ön cam", Opening.Kind.Window))
+            if (windowRearLeft == true) add(Opening("Sol arka cam", Opening.Kind.Window))
+            if (windowRearRight == true) add(Opening("Sağ arka cam", Opening.Kind.Window))
+            if (sunroof == true) add(Opening("Sunroof", Opening.Kind.Window))
         }
 
     val isEmpty: Boolean
