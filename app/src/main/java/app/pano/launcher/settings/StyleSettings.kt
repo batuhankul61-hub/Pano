@@ -29,8 +29,11 @@ enum class MapStyle(val label: String, val dayUrl: String) {
     Bright("Parlak", "https://tiles.openfreemap.org/styles/bright"),
 }
 
-/** Ana ekran düzeni: klasik Pano kartları ya da iOS / CarPlay havasında cam arayüz. */
-enum class LayoutStyle(val label: String) { Pano("Klasik"), CarPlay("CarPlay") }
+/**
+ * Ana ekran düzeni: klasik Pano kartları, iOS / CarPlay havasında cam arayüz ya da haritayı tuval
+ * yapan Ufuk (solda araç sütunu, sağda tam harita, altta sabit çubuk).
+ */
+enum class LayoutStyle(val label: String) { Pano("Klasik"), CarPlay("CarPlay"), Ufuk("Ufuk") }
 
 data class StyleSettings(
     val developerMode: Boolean = false,

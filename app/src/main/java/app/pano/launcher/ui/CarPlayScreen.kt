@@ -971,7 +971,7 @@ private fun MapWidget(modifier: Modifier) {
 }
 
 @Composable
-private fun ManeuverCard(
+internal fun ManeuverCard(
     distance: String?,
     title: String,
     eta: String?,
@@ -1013,7 +1013,7 @@ private fun ManeuverCard(
 }
 
 /** Valhalla manevra türüne göre ok. */
-private fun maneuverIcon(type: Int): ImageVector = when (type) {
+internal fun maneuverIcon(type: Int): ImageVector = when (type) {
     4, 5, 6 -> PanoIcons.Flag
     9, 18, 20, 23, 37 -> PanoIcons.SlightRight
     10, 11 -> PanoIcons.TurnRight
@@ -1030,7 +1030,7 @@ private fun arrivalClock(remainingS: Double): String =
 
 /** Yönlendirme sırasında haritanın altında: varış saati, kalan süre/mesafe ve "Bitir". */
 @Composable
-private fun NavBottomBar(session: NavSession, modifier: Modifier) {
+internal fun NavBottomBar(session: NavSession, modifier: Modifier) {
     val c = glass()
     val route = session.route ?: return
     val remainingS = session.progress?.remainingS ?: route.timeS
@@ -1062,7 +1062,7 @@ private fun NavBottomBar(session: NavSession, modifier: Modifier) {
  * hedef özeti, sıradaki manevralar ve "Navigasyonu bitir".
  */
 @Composable
-private fun NavScreen(modifier: Modifier, onClose: () -> Unit) {
+internal fun NavScreen(modifier: Modifier, onClose: () -> Unit) {
     val c = glass()
     val context = LocalContext.current
     LaunchedEffect(Unit) { PanoNav.init(context) }
@@ -1692,7 +1692,7 @@ private fun duration(ms: Long): String {
  * Kapağa dokununca kaynak uygulama tam ekran açılır.
  */
 @Composable
-private fun NowPlayingScreen(modifier: Modifier) {
+internal fun NowPlayingScreen(modifier: Modifier) {
     val c = glass()
     val context = LocalContext.current
     val playing by MediaHub.state.collectAsState()

@@ -129,13 +129,13 @@ fun PanoApp(screen: Screen, onNavigate: (Screen) -> Unit) {
     // Harita tüm ekranlar ve iki düzen arasında paylaşılıyor; geçişlerde yeniden yüklenmiyor.
     app.pano.launcher.ui.ProvideMapHolder {
         Box(Modifier.fillMaxSize()) {
-            val carPlay = LocalStyle.current.layout == LayoutStyle.CarPlay
-            // CarPlay düzeninde uygulamalar sağ yarıda açılır (Tesla gibi); klasik düzende tam ekran.
-            Launch.sideBySide = carPlay
-            if (carPlay) {
-                CarPlayApp(screen, climate, onNavigate)
-            } else {
-                ClassicApp(screen, climate, onNavigate)
+            val layout = LocalStyle.current.layout
+            // CarPlay düzeninde uygulamalar sağ yarıda açılır (Tesla gibi); klasik ve Ufuk'ta tam ekran.
+            Launch.sideBySide = layout == LayoutStyle.CarPlay
+            when (layout) {
+                LayoutStyle.CarPlay -> CarPlayApp(screen, climate, onNavigate)
+                LayoutStyle.Ufuk -> app.pano.launcher.ui.UfukApp(screen, climate, onNavigate)
+                LayoutStyle.Pano -> ClassicApp(screen, climate, onNavigate)
             }
             // WhatsApp / SMS mesajları her iki düzenin üstünde kısa bir banner olarak görünür.
             app.pano.launcher.ui.MessageBanner()
