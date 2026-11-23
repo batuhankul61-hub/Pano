@@ -104,6 +104,9 @@ private const val UfukMotionMs = 240
 /** Araç sütununun genişliği (tasarım tuvalinde). */
 private val CarColumnWidth = 500.dp
 
+/** Rota önizlemesinde "Nereye?" kartının kapladığı harita oranı (sağdan). */
+private const val NavNarrowInset = 0.56f
+
 /** Alt çubuğun yüksekliği. */
 private val BarHeight = 112.dp
 
@@ -145,12 +148,15 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
         DesignCanvas {
             Column(Modifier.fillMaxSize().returnZoom()) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
+                    // Rota seçilince "Nereye?" kartı haritanın sağ yarısına çekilir; rota sol yarıda görünür.
+                    val navSession by PanoNav.state.collectAsState()
+                    val navNarrow = panel == UfukPanel.Nav && navSession != null
                     Row(Modifier.fillMaxSize()) {
                         CarColumn(Modifier.width(CarColumnWidth).fillMaxHeight())
-                        MapCanvas(Modifier.weight(1f).fillMaxHeight())
+                        MapCanvas(Modifier.weight(1f).fillMaxHeight(), endInset = if (navNarrow) NavNarrowInset else 0f)
                     }
                     // Kartlar haritanın üstünde açılır; klima geniş olduğu için araç sütununu da örter.
-                    PanelHost(panel, climate, onNavigate, onClose = ::closePanel)
+                    PanelHost(panel, navNarrow, climate, onNavigate, onClose = ::closePanel)
                 }
                 BottomBar(climate, screen, panel, onNavigate, Modifier.fillMaxWidth().height(BarHeight))
             }
@@ -336,7 +342,7 @@ private fun NowPlayingStrip() {
 // ───────────────────────── Harita tuvali ─────────────────────────
 
 @Composable
-private fun MapCanvas(modifier: Modifier) {
+private fun MapCanvas(modifier: Modifier, endInset: Float) {
     val c = LocalPano.current
     val context = LocalContext.current
     val granted = remember { hasLocationPermission(context) }
@@ -346,7 +352,7 @@ private fun MapCanvas(modifier: Modifier) {
     val external by NavHub.state.collectAsState()
 
     Box(modifier.background(if (c.isDark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
-        LiveMap(Modifier.fillMaxSize(), dark = c.isDark, showLocation = granted, bottomInset = 0f)
+        LiveMap(Modifier.fillMaxSize(), dark = c.isDark, showLocation = granted, bottomInset = 0f, endInset = endInset)
 
         // Üst sol: arama ya da sıradaki manevra.
         val top = Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 24.dp).width(560.dp)
@@ -369,6 +375,8 @@ private fun MapCanvas(modifier: Modifier) {
             step != null -> ManeuverCard(
                 distance = step.distance, title = step.street ?: step.maneuver, eta = step.eta, bitmap = step.icon, modifier = top,
             ) { Launch.maps(context) }
+            // "Nereye?" kartı açıkken arama kutusu tekrar olur ve kartın arkasında yarım kalır.
+            AppSheet.nav -> Unit
             else -> Row(
                 top.height(72.dp).clip(RoundedCornerShape(36.dp)).background(c.glass)
                     .border(1.dp, c.hairline, RoundedCornerShape(36.dp))
@@ -431,7 +439,7 @@ private fun ClockWeather(modifier: Modifier) {
 // ───────────────────────── Harita üstü kart ─────────────────────────
 
 @Composable
-private fun BoxScope.PanelHost(panel: UfukPanel?, climate: ClimateState, onNavigate: (Screen) -> Unit, onClose: () -> Unit) {
+private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, climate: ClimateState, onNavigate: (Screen) -> Unit, onClose: () -> Unit) {
     val c = LocalPano.current
     var shown by remember { mutableStateOf<UfukPanel?>(null) }
     if (panel != null) shown = panel
@@ -444,7 +452,14 @@ private fun BoxScope.PanelHost(panel: UfukPanel?, climate: ClimateState, onNavig
         val p = shown ?: return@AnimatedVisibility
         val shape = RoundedCornerShape(28.dp)
         Box(
-            Modifier.fillMaxSize().padding(start = if (p == UfukPanel.Climate) 0.dp else CarColumnWidth)
+            Modifier.fillMaxSize()
+                .padding(
+                    start = when {
+                        p == UfukPanel.Climate -> 0.dp
+                        navNarrow -> CarColumnWidth + (1600.dp - CarColumnWidth) * (1f - NavNarrowInset)
+                        else -> CarColumnWidth
+                    },
+                )
                 .padding(16.dp).clip(shape).background(c.card).border(1.dp, c.hairline, shape),
         ) {
             AnimatedContent(
