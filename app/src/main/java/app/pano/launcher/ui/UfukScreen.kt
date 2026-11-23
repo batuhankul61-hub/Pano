@@ -296,7 +296,7 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
         }
         CarIllustration(Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp), dark = c.isDark, background = Color.Transparent)
         // Müzik yalnızca bir şey çalıyorsa yer kaplar.
-        NowPlayingStrip()
+        NowPlayingStrip(compact)
     }
 }
 
@@ -345,9 +345,14 @@ private fun CarHotspot(icon: ImageVector, label: String, onClick: () -> Unit, mo
     }
 }
 
+/**
+ * Sütunun altındaki müzik şeridi. Dar sütunda (sürüş, yönlendirme) üç 72 dp düğme şarkı adına
+ * yer bırakmıyordu; o zaman "Önceki" düşer, düğmeler 64 dp olur ve ad park halindeki kadar yer bulur.
+ */
 @Composable
-private fun NowPlayingStrip() {
+private fun NowPlayingStrip(compact: Boolean) {
     val c = LocalPano.current
+    val button = if (compact) 64.dp else 72.dp
     val playing by MediaHub.state.collectAsState()
     val p = playing
     AnimatedVisibility(p != null, enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs))) {
@@ -372,12 +377,14 @@ private fun NowPlayingStrip() {
                     Text(p.artist, color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            RoundIconButton(PanoIcons.Previous, "Önceki", { MediaHub.previous() }, Color.Transparent, c.text, size = 72.dp, iconSize = 26.dp)
+            if (!compact) {
+                RoundIconButton(PanoIcons.Previous, "Önceki", { MediaHub.previous() }, Color.Transparent, c.text, size = button, iconSize = 26.dp)
+            }
             RoundIconButton(
                 if (p.isPlaying) PanoIcons.Pause else PanoIcons.Play, if (p.isPlaying) "Duraklat" else "Çal",
-                { MediaHub.playPause() }, Color.Transparent, c.text, size = 72.dp, iconSize = 30.dp,
+                { MediaHub.playPause() }, Color.Transparent, c.text, size = button, iconSize = 30.dp,
             )
-            RoundIconButton(PanoIcons.Next, "Sonraki", { MediaHub.next() }, Color.Transparent, c.text, size = 72.dp, iconSize = 26.dp)
+            RoundIconButton(PanoIcons.Next, "Sonraki", { MediaHub.next() }, Color.Transparent, c.text, size = button, iconSize = 26.dp)
         }
     }
 }
