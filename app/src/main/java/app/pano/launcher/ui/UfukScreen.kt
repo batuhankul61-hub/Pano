@@ -139,6 +139,11 @@ private const val NavNarrowInset = 0.56f
 
 /** Alt çubuğun yüksekliği. */
 internal val BarHeight = 112.dp
+/**
+ * Uygulamaların üstündeki ince şeridin boyu (tasarım birimi). Uygulamanın altını Pano'daki şeritten
+ * az örtsün diye ince; düğmeler yine ≥60 birim (sürüşte dokunulabilir).
+ */
+internal val OverlayBarHeight = 72.dp
 
 /** Sürüşte kısıtlama: araç hareket ediyor **ve** ayarlarda açık. */
 @Composable
@@ -739,41 +744,26 @@ private fun DrivingGate(title: String, onClose: () -> Unit, content: @Composable
 
 // ───────────────────────── Alt çubuk ─────────────────────────
 
-/**
- * Alt çubuk. [outside] = Pano arkadayken başka uygulamanın üstünde duran kopya: en solda Pano'ya
- * dönüş düğmesi, ayrı zemin ve kalın üst kenar (uygulamadan net ayrılsın). [onClimate] verilirse
- * Klima ve sıcaklık sayıları Pano'yu açmak yerine onu çağırır (şeridin üstündeki klima kartı).
- */
+/** Pano'daki alt çubuk. Uygulamaların üstündeki ince kopyası [OverlayStrip]. */
 @Composable
 private fun BottomBar(
     climate: ClimateState, screen: Screen, panel: UfukPanel?, volume: UfukVolume, onNavigate: (Screen) -> Unit, modifier: Modifier,
-    outside: Boolean = false,
-    climateOpen: Boolean = false,
-    onHome: (() -> Unit)? = null,
-    onClimate: (() -> Unit)? = null,
 ) {
     val c = LocalPano.current
     val context = LocalContext.current
     val playing by MediaHub.state.collectAsState()
     val locked = ufukDrivingLocked()
     fun toggle(target: Screen) = onNavigate(if (screen == target) Screen.Home else target)
-    val openClimate = onClimate ?: { toggle(Screen.Climate) }
+    val openClimate = { toggle(Screen.Climate) }
+    val edge = c.hairline
 
-    val surface = if (outside) overlayBarColor(c) else c.background
-    val edge = if (outside) overlayEdgeColor(c) else c.hairline
-    val edgeWidth = if (outside) 3.dp else 1.dp
     Row(
-        modifier.background(surface).drawBehind {
-            val w = edgeWidth.toPx()
-            drawRect(edge, size = androidx.compose.ui.geometry.Size(size.width, w))
+        modifier.background(c.background).drawBehind {
+            drawRect(edge, size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx()))
         }
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (onHome != null) {
-            HomeButton(onHome)
-            Box(Modifier.padding(start = 12.dp, end = 4.dp).width(1.dp).height(48.dp).background(edge))
-        }
         BarTemp(
             "Sürücü", climate.driver, climate.step, climate.isOff,
             onDown = { climate.changeDriver(-0.5f) }, onUp = { climate.changeDriver(0.5f) },
@@ -785,9 +775,6 @@ private fun BottomBar(
                 active = panel == UfukPanel.Music, playing = playing?.isPlaying == true,
             ) {
                 when {
-                    // Başka uygulamanın üstündeki şeritten: müzik kartı Pano'da açılır.
-                    outside && (playing != null || Launch.hasRadio(context)) -> { AppSheet.openMusic(); onNavigate(Screen.Home) }
-                    outside -> Launch.music(context, null)
                     AppSheet.music -> AppSheet.close()
                     // Hiçbir şey çalmasa da araçta radyo varsa panel açılır: oradan radyo ya da müzik seçilir.
                     playing != null || Launch.hasRadio(context) -> AppSheet.openMusic()
@@ -795,7 +782,7 @@ private fun BottomBar(
                 }
             }
             BarApp(PanoIcons.Phone, "Telefon") { Launch.phone(context) }
-            BarApp(PanoIcons.Fan, "Klima", active = panel == UfukPanel.Climate || climateOpen) { openClimate() }
+            BarApp(PanoIcons.Fan, "Klima", active = panel == UfukPanel.Climate) { openClimate() }
             BarApp(PanoIcons.Apps, "Uygulamalar", active = panel == UfukPanel.Apps, dimmed = locked) { toggle(Screen.Apps) }
             BarApp(PanoIcons.Sliders, "Ayarlar", active = panel == UfukPanel.Settings, dimmed = locked) { toggle(Screen.Settings) }
         }
@@ -819,16 +806,17 @@ private fun overlayEdgeColor(c: PanoColors): Color = if (c.isDark) Color(0xFF3A3
 
 /** Pano'ya (ana sayfaya) dönüş: şeridin en solunda, en büyük düğme. */
 @Composable
-private fun HomeButton(onClick: () -> Unit) {
+private fun HomeButton(onClick: () -> Unit, compact: Boolean = false) {
     val c = LocalPano.current
     Box(
-        Modifier.width(104.dp).height(80.dp).clip(RoundedCornerShape(22.dp))
+        Modifier.width(if (compact) 92.dp else 104.dp).height(if (compact) 60.dp else 80.dp)
+            .clip(RoundedCornerShape(if (compact) 18.dp else 22.dp))
             .background(if (c.isDark) c.raised else c.card)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = "Pano ana sayfası" },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(PanoIcons.Home, contentDescription = null, tint = c.text, modifier = Modifier.size(38.dp))
+        Icon(PanoIcons.Home, contentDescription = null, tint = c.text, modifier = Modifier.size(if (compact) 32.dp else 38.dp))
     }
 }
 
@@ -846,23 +834,29 @@ private fun tabular() = androidx.compose.material3.LocalTextStyle.current.copy(f
 
 /** Sıcaklık: oklar ≥72 dp, sayıya dokununca klima kartı açılır. Sayının kutusu sabit genişlikte. */
 @Composable
-private fun BarTemp(who: String, value: Float, step: Float, off: Boolean, onDown: () -> Unit, onUp: () -> Unit, onOpen: () -> Unit) {
+private fun BarTemp(
+    who: String, value: Float, step: Float, off: Boolean, onDown: () -> Unit, onUp: () -> Unit, onOpen: () -> Unit,
+    compact: Boolean = false,
+) {
     val c = LocalPano.current
+    val button = if (compact) 64.dp else 72.dp
+    val icon = if (compact) 26.dp else 30.dp
     Row(verticalAlignment = Alignment.CenterVertically) {
-        RoundIconButton(PanoIcons.ChevronLeft, "$who sıcaklığını düşür", onDown, Color.Transparent, c.secondary, size = 72.dp, iconSize = 30.dp)
+        RoundIconButton(PanoIcons.ChevronLeft, "$who sıcaklığını düşür", onDown, Color.Transparent, c.secondary, size = button, iconSize = icon)
         Box(
-            Modifier.width(128.dp).height(72.dp).clip(RoundedCornerShape(20.dp))
+            Modifier.width(if (compact) 112.dp else 128.dp).height(button).clip(RoundedCornerShape(20.dp))
                 .clickable(role = Role.Button, onClickLabel = "Klima") { onOpen() }
                 .semantics { contentDescription = "$who sıcaklığı" },
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                if (off) "Kapalı" else barTempText(value, step), color = c.text, fontSize = if (off) 24.sp else 34.sp,
+                if (off) "Kapalı" else barTempText(value, step), color = c.text,
+                fontSize = when { off -> if (compact) 20.sp else 24.sp; compact -> 30.sp; else -> 34.sp },
                 fontWeight = FontWeight.Normal, letterSpacing = (-0.5).sp, maxLines = 1,
                 style = tabular(),
             )
         }
-        RoundIconButton(PanoIcons.ChevronRight, "$who sıcaklığını artır", onUp, Color.Transparent, c.secondary, size = 72.dp, iconSize = 30.dp)
+        RoundIconButton(PanoIcons.ChevronRight, "$who sıcaklığını artır", onUp, Color.Transparent, c.secondary, size = button, iconSize = icon)
     }
 }
 
@@ -872,7 +866,8 @@ private fun BarTemp(who: String, value: Float, step: Float, off: Boolean, onDown
  */
 @Composable
 private fun BarApp(
-    icon: ImageVector, label: String, active: Boolean = false, dimmed: Boolean = false, playing: Boolean = false, onClick: () -> Unit,
+    icon: ImageVector, label: String, active: Boolean = false, dimmed: Boolean = false, playing: Boolean = false,
+    compact: Boolean = false, onClick: () -> Unit,
 ) {
     val c = LocalPano.current
     val fg = when {
@@ -882,14 +877,15 @@ private fun BarApp(
         else -> c.secondary
     }
     Box(
-        Modifier.width(96.dp).height(80.dp).clip(RoundedCornerShape(22.dp))
+        Modifier.width(if (compact) 84.dp else 96.dp).height(if (compact) 60.dp else 80.dp)
+            .clip(RoundedCornerShape(if (compact) 18.dp else 22.dp))
             .background(if (active) activeColor() else Color.Transparent)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(34.dp), tint = fg)
-        if (playing) PlayingBars(fg, Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp))
+        Icon(icon, contentDescription = null, modifier = Modifier.size(if (compact) 28.dp else 34.dp), tint = fg)
+        if (playing) PlayingBars(fg, Modifier.align(Alignment.BottomCenter).padding(bottom = if (compact) 4.dp else 7.dp))
     }
 }
 
@@ -949,7 +945,7 @@ fun UfukOverlayBar(scale: Float, onOpen: (Screen) -> Unit, onHeight: (designHeig
     // Pencere açılırken hemen büyür; kapanırken kayma bitince şerit boyuna iner (dokunuşlar yine uygulamaya).
     LaunchedEffect(popup) {
         if (popup == null) delay(UfukMotionMs.toLong())
-        onHeight(if (popup == OverlayPopup.Climate) null else BarHeight.value + popupHeight(popup).value)
+        onHeight(if (popup == OverlayPopup.Climate) null else OverlayBarHeight.value + popupHeight(popup).value)
     }
     DisposableEffect(Unit) { onDispose { UfukOverlayState.dismiss() } }
 
@@ -983,16 +979,64 @@ fun UfukOverlayBar(scale: Float, onOpen: (Screen) -> Unit, onHeight: (designHeig
                     VolumeHudBody(volume, Modifier.swallowTaps(), edge = overlayEdgeColor(LocalPano.current))
                 }
             }
-            BottomBar(
-                climate, Screen.Home, null, volume, onOpen, Modifier.fillMaxWidth().height(BarHeight),
-                outside = true,
+            OverlayStrip(
+                climate, volume, Modifier.fillMaxWidth().height(OverlayBarHeight),
                 climateOpen = popup == OverlayPopup.Climate,
-                onHome = { onOpen(Screen.Home) },
+                onOpen = onOpen,
                 onClimate = {
                     UfukOverlayState.popup = if (UfukOverlayState.popup == OverlayPopup.Climate) null else OverlayPopup.Climate
                 },
             )
         }
+    }
+}
+
+/**
+ * Uygulamaların üstündeki ince şerit: yalnızca uygulamadan çıkmadan gereken kontroller.
+ * Ev (Pano'ya dönüş) · sürücü sıcaklığı · Müzik, Telefon, Klima · yolcu sıcaklığı · ses.
+ * Uygulamalar ve Ayarlar yok: ikisi de Pano'yu açıyordu, ev düğmesi o işi görüyor.
+ */
+@Composable
+private fun OverlayStrip(
+    climate: ClimateState, volume: UfukVolume, modifier: Modifier,
+    climateOpen: Boolean, onOpen: (Screen) -> Unit, onClimate: () -> Unit,
+) {
+    val c = LocalPano.current
+    val context = LocalContext.current
+    val playing by MediaHub.state.collectAsState()
+    val edge = overlayEdgeColor(c)
+    Row(
+        modifier.background(overlayBarColor(c))
+            .drawBehind { drawRect(edge, size = androidx.compose.ui.geometry.Size(size.width, 3.dp.toPx())) }
+            .padding(start = 8.dp, end = 12.dp, top = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        HomeButton({ onOpen(Screen.Home) }, compact = true)
+        Box(Modifier.padding(start = 10.dp, end = 2.dp).width(1.dp).height(36.dp).background(edge))
+        BarTemp(
+            "Sürücü", climate.driver, climate.step, climate.isOff,
+            onDown = { climate.changeDriver(-0.5f) }, onUp = { climate.changeDriver(0.5f) },
+            onOpen = onClimate, compact = true,
+        )
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+            val isPlaying = playing?.isPlaying == true
+            BarApp(PanoIcons.Music, if (isPlaying) "Müzik, çalıyor" else "Müzik", playing = isPlaying, compact = true) {
+                // Müzik kartı Pano'da açılır; çalan ya da radyo yoksa müzik uygulaması.
+                if (playing != null || Launch.hasRadio(context)) { AppSheet.openMusic(); onOpen(Screen.Home) }
+                else Launch.music(context, null)
+            }
+            BarApp(PanoIcons.Phone, "Telefon", compact = true) { Launch.phone(context) }
+            BarApp(PanoIcons.Fan, "Klima", active = climateOpen, compact = true) { onClimate() }
+        }
+        if (climate.dualZone) {
+            BarTemp(
+                "Yolcu", climate.passenger, climate.step, climate.isOff,
+                onDown = { climate.changePassenger(-0.5f) }, onUp = { climate.changePassenger(0.5f) },
+                onOpen = onClimate, compact = true,
+            )
+        }
+        Box(Modifier.padding(horizontal = 10.dp).width(1.dp).height(36.dp).background(edge))
+        VolumeControl(volume, compact = true)
     }
 }
 
@@ -1180,22 +1224,23 @@ private fun rememberUfukVolume(): UfukVolume {
 
 /** Ses: − / hoparlör (sessize al) / +. Medya ses akışını değiştirir. */
 @Composable
-private fun VolumeControl(volume: UfukVolume) {
+private fun VolumeControl(volume: UfukVolume, compact: Boolean = false) {
     val c = LocalPano.current
+    val button = if (compact) 64.dp else 72.dp
     Row(verticalAlignment = Alignment.CenterVertically) {
-        RoundIconButton(PanoIcons.Minus, "Sesi kıs", { volume.adjust(AudioManager.ADJUST_LOWER) }, Color.Transparent, c.secondary, size = 72.dp, iconSize = 26.dp)
+        RoundIconButton(PanoIcons.Minus, "Sesi kıs", { volume.adjust(AudioManager.ADJUST_LOWER) }, Color.Transparent, c.secondary, size = button, iconSize = 26.dp)
         Box(
-            Modifier.size(72.dp).clip(CircleShape)
+            Modifier.size(button).clip(CircleShape)
                 .clickable(role = Role.Button) { volume.adjust(AudioManager.ADJUST_TOGGLE_MUTE) }
                 .semantics { contentDescription = if (volume.muted) "Sesi aç" else "Sessize al" },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 if (volume.muted || volume.level == 0) PanoIcons.SpeakerOff else PanoIcons.Speaker, contentDescription = null,
-                tint = if (volume.muted) Accent.Red else c.text, modifier = Modifier.size(30.dp),
+                tint = if (volume.muted) Accent.Red else c.text, modifier = Modifier.size(if (compact) 28.dp else 30.dp),
             )
         }
-        RoundIconButton(PanoIcons.Plus, "Sesi aç", { volume.adjust(AudioManager.ADJUST_RAISE) }, Color.Transparent, c.secondary, size = 72.dp, iconSize = 26.dp)
+        RoundIconButton(PanoIcons.Plus, "Sesi aç", { volume.adjust(AudioManager.ADJUST_RAISE) }, Color.Transparent, c.secondary, size = button, iconSize = 26.dp)
     }
 }
 

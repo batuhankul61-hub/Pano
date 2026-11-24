@@ -22,7 +22,7 @@ import app.pano.launcher.MainActivity
 import app.pano.launcher.Screen
 import app.pano.launcher.settings.LayoutStyle
 import app.pano.launcher.settings.Settings as PanoSettings
-import app.pano.launcher.ui.BarHeight
+import app.pano.launcher.ui.OverlayBarHeight
 import app.pano.launcher.ui.UfukOverlayBar
 import app.pano.launcher.ui.UfukOverlayState
 import app.pano.launcher.ui.theme.PanoTheme
@@ -79,7 +79,7 @@ object BarOverlay {
         val m = DisplayMetrics().also { @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(it) }
         val scale = min(m.widthPixels / m.density / 1600f, m.heightPixels / m.density / 900f)
         unitPx = m.density * scale
-        val height = (BarHeight.value * unitPx).roundToInt()
+        val height = (OverlayBarHeight.value * unitPx).roundToInt()
 
         // Ana ekranı tanımak için erişilebilirlik hizmeti gerekir; güvenli ayar izni varsa Pano'nun
         // kendi hizmeti eklenir (dock'taki Geri düğmesiyle aynı yol, başka hizmetlere dokunulmaz).
