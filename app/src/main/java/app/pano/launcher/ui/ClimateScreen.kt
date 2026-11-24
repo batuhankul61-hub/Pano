@@ -124,13 +124,23 @@ private fun CenterPanel(climate: ClimateState, modifier: Modifier) {
     val colors = LocalPano.current
     PanoCard(modifier, padding = 30.dp) {
         CardLabel(null, "Hava yönü", modifier = Modifier.padding(bottom = 14.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Yüz/ayak henüz araca gönderilmiyor; araca bağlıyken boşuna gösterilmez.
-            if (climate.airDirectionSupported) {
-                ModeTile("Yüz", PanoIcons.AirFace, climate.face, Modifier.weight(1f)) { climate.face = !climate.face; climate.auto = false }
-                ModeTile("Ayak", PanoIcons.AirFeet, climate.foot, Modifier.weight(1f)) { climate.foot = !climate.foot; climate.auto = false }
+        // Aracın kendi klima ekranındaki gibi her yön ayrı tuş (5 modlu araçta tek sıra, 7 modluda iki).
+        val modes = app.pano.launcher.vehicle.AirMode.available(climate.airModeCount)
+        modes.chunked(if (modes.size > 5) 4 else 5).forEachIndexed { i, row ->
+            Row(
+                Modifier.fillMaxWidth().padding(top = if (i > 0) 12.dp else 0.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                row.forEach { mode ->
+                    AirModeTile(mode, climate.airMode == mode.code, Modifier.weight(1f)) {
+                        // BYD'de yön seçmek otomatik klimadan çıkarır.
+                        climate.airMode = mode.code
+                        climate.auto = false
+                    }
+                }
+                // Son sıradaki boşluklar: tuşlar üst sıradakilerle aynı genişlikte kalsın.
+                repeat((if (modes.size > 5) 4 else 5) - row.size) { Box(Modifier.weight(1f)) }
             }
-            ModeTile("Buğu çözme", PanoIcons.Defrost, climate.defrost, Modifier.weight(1f)) { climate.defrost = !climate.defrost; climate.auto = false }
         }
 
         Row(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 14.dp), verticalAlignment = Alignment.Bottom) {
@@ -168,10 +178,38 @@ private fun CenterPanel(climate: ClimateState, modifier: Modifier) {
             ToggleTile("İç hava", "İç hava sirkülasyonu", PanoIcons.Recirculation, climate.recirculation, Modifier.weight(1f)) {
                 climate.recirculation = it
             }
+            ToggleTile("Ön cam", "Ön cam buğu çözme", PanoIcons.Defrost, climate.defrost, Modifier.weight(1f)) {
+                climate.defrost = it
+                climate.auto = false
+            }
             ToggleTile("Arka cam", "Arka cam ısıtma", PanoIcons.RearDefrost, climate.rearDefrost, Modifier.weight(1f)) {
                 climate.rearDefrost = it
             }
         }
+    }
+}
+
+/**
+ * Üfleme yönü tuşu: yönün parçaları (yüz, ayak, cam) simge olarak yan yana, altında adı.
+ * Seçili olan renkleri tersine çevirir; tuşun tamamı dokunma alanı (sürüşte büyük).
+ */
+@Composable
+private fun AirModeTile(mode: app.pano.launcher.vehicle.AirMode, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val colors = LocalPano.current
+    Column(
+        modifier.height(112.dp).clip(RoundedCornerShape(22.dp)).background(if (on) activeColor() else colors.raised)
+            .clickable(role = Role.RadioButton, onClickLabel = mode.label, onClick = onClick)
+            .padding(horizontal = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
+    ) {
+        val fg = if (on) onActiveColor() else colors.text
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (mode.face) Icon(PanoIcons.AirFace, contentDescription = null, tint = fg, modifier = Modifier.size(28.dp))
+            if (mode.feet) Icon(PanoIcons.AirFeet, contentDescription = null, tint = fg, modifier = Modifier.size(28.dp))
+            if (mode.windshield) Icon(PanoIcons.Defrost, contentDescription = null, tint = fg, modifier = Modifier.size(28.dp))
+        }
+        Text(mode.short, color = fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
     }
 }
 

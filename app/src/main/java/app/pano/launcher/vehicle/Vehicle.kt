@@ -53,8 +53,10 @@ class ClimateState {
     var fan by mutableIntStateOf(3)
     var auto by mutableStateOf(true)
     var ac by mutableStateOf(true)
-    var face by mutableStateOf(true)
-    var foot by mutableStateOf(true)
+    /** Üfleme yönü ([AirMode] kodu, 1–7). Araçtan okunur, dokununca araca yazılır. */
+    var airMode by mutableIntStateOf(AirMode.FaceFeet.code)
+    /** Aracın desteklediği yön sayısı (5 ya da 7). */
+    var airModeCount by mutableIntStateOf(5)
     var defrost by mutableStateOf(false)
     var driverSeat by mutableIntStateOf(1)
     var passengerSeat by mutableIntStateOf(0)
@@ -68,9 +70,6 @@ class ClimateState {
      */
     var dualZone by mutableStateOf(true)
     var seatHeating by mutableStateOf(true)
-
-    /** Araca bağlıyken yalnızca araca gerçekten giden ayarlar gösterilir (yüz/ayak henüz gitmiyor). */
-    val airDirectionSupported: Boolean get() = !linked
 
     val isOff: Boolean get() = fan == 0
 

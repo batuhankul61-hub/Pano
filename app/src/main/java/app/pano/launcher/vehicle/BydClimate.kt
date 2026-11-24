@@ -21,7 +21,8 @@ import kotlin.math.roundToInt
  * her komutun yanında kontrol kaynağı = 0 "arayüz tuşu"). O sınıf imza izni istediği için
  * komutlar doğrudan genel veri yoluna ([BydBus.write]) yazılır.
  *
- * Yüz/ayak üfleme, koltuk ısıtma ve senkron şimdilik araca gitmiyor; yalnızca ekranda kalıyor.
+ * Üfleme yönü ([AirMode]) `AC_WIND_MODE` ile okunur, `AC_WIND_MODE_SET` ile yazılır
+ * (`BYDAutoAcDevice.setAcWindMode` ile aynı). Koltuk ısıtma ve senkron şimdilik araca gitmiyor.
  */
 object BydClimate {
     private const val TAG = "BydClimate"
@@ -44,7 +45,12 @@ object BydClimate {
         val recirculation: Boolean,
         val defrost: Boolean,
         val rearDefrost: Boolean,
+        /** Üfleme yönü ([AirMode] kodu); bilinmiyorsa null. */
+        val airMode: Int?,
     )
+
+    /** `BYDAutoAcDevice.getAcWindModeNum` kimliği (sınıfta sabit yazılı; protokole göre değişmiyor). */
+    private const val AC_WIND_MODE_NUM = 1127219230
 
     @Volatile private var last: Car? = null
     @Volatile private var lastWriteAt = 0L
@@ -68,6 +74,9 @@ object BydClimate {
             s.dualZone = features.dualZoneClimate
             dualZone = features.dualZoneClimate
             s.seatHeating = features.seatHeating
+            val modeCount = withContext(Dispatchers.IO) { BydBus.readRaw(AC_WIND_MODE_NUM) }
+            s.airModeCount = AirMode.countFromByd(modeCount)
+            Log.i(TAG, "üfleme yönü: ${AirMode.of(first.airMode) ?: "bilinmiyor (${first.airMode})"}, mod sayısı ham=$modeCount → ${s.airModeCount}")
             s.step = 1f
             s.minTemp = 17f
             s.maxTemp = 33f
@@ -111,6 +120,7 @@ object BydClimate {
             recirculation = int("AC_CYCLE_MODE") == 1,
             defrost = int("AC_DEFROST_FRONT_STATE") == 1,
             rearDefrost = int("AC_DEFROST_REAR_STATE") == 1,
+            airMode = AirMode.of(int("AC_WIND_MODE"))?.code ?: last?.airMode,
         )
     }
 
@@ -133,9 +143,11 @@ object BydClimate {
         recirculation = s.recirculation,
         defrost = s.defrost,
         rearDefrost = s.rearDefrost,
+        airMode = s.airMode,
     )
 
     private fun apply(car: Car, s: ClimateState) {
+        car.airMode?.let { s.airMode = it }
         s.driver = car.driver.toFloat()
         s.passenger = car.passenger.toFloat()
         // Kapalıyken fan 0 gösterilir; Pano'da "kapalı" fan seviyesiyle ifade ediliyor.
@@ -185,6 +197,13 @@ object BydClimate {
         if (w.recirculation != car.recirculation) send(listOf("AC_CYCLE_MODE_SET"), w.recirculation.bit)
         if (w.defrost != car.defrost) send(listOf("AC_DEFROST_FRONT_STATE_SET"), w.defrost.bit)
         if (w.rearDefrost != car.rearDefrost) send(listOf("AC_DEFROST_REAR_STATE_SET"), w.rearDefrost.bit)
+        // Yön seçmek BYD'de elle moda geçirir (otomatik kapanır); geçerli kodlar 1–7. Araç yönü hiç
+        // bildirmiyorsa (car.airMode null) yazılmaz: ekrandaki varsayılan istenmemiş komut olarak gitmesin.
+        val mode = w.airMode
+        if (mode != null && car.airMode != null && mode != car.airMode && AirMode.of(mode) != null) {
+            send(listOf("AC_WIND_MODE_SET"), mode)
+            Log.i(TAG, "üfleme yönü gönderildi: ${AirMode.of(mode)}")
+        }
         return w
     }
 

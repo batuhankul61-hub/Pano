@@ -55,8 +55,7 @@ object ClimateStore {
         s.fan = p.getInt("fan", d.fan).coerceIn(0, 7)
         s.auto = p.getBoolean("auto", d.auto)
         s.ac = p.getBoolean("ac", d.ac)
-        s.face = p.getBoolean("face", d.face)
-        s.foot = p.getBoolean("foot", d.foot)
+        s.airMode = (AirMode.of(p.getInt("airMode", d.airMode)) ?: AirMode.FaceFeet).code
         s.defrost = p.getBoolean("defrost", d.defrost)
         s.rearDefrost = p.getBoolean("rearDefrost", d.rearDefrost)
         s.driverSeat = p.getInt("driverSeat", d.driverSeat).coerceIn(0, 3)
@@ -75,8 +74,7 @@ object ClimateStore {
             .putInt("fan", v.fan)
             .putBoolean("auto", v.auto)
             .putBoolean("ac", v.ac)
-            .putBoolean("face", v.face)
-            .putBoolean("foot", v.foot)
+            .putInt("airMode", v.airMode)
             .putBoolean("defrost", v.defrost)
             .putBoolean("rearDefrost", v.rearDefrost)
             .putInt("driverSeat", v.driverSeat)
@@ -97,8 +95,7 @@ object ClimateStore {
         val fan: Int,
         val auto: Boolean,
         val ac: Boolean,
-        val face: Boolean,
-        val foot: Boolean,
+        val airMode: Int,
         val defrost: Boolean,
         val rearDefrost: Boolean,
         val driverSeat: Int,
@@ -108,7 +105,7 @@ object ClimateStore {
     ) {
         companion object {
             fun of(s: ClimateState) = Values(
-                s.driver, s.passenger, s.fan, s.auto, s.ac, s.face, s.foot,
+                s.driver, s.passenger, s.fan, s.auto, s.ac, s.airMode,
                 s.defrost, s.rearDefrost, s.driverSeat, s.passengerSeat, s.sync, s.recirculation,
             )
         }
