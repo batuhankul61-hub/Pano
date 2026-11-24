@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.launch
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -639,8 +641,31 @@ private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, columnWidt
     ) {
         val p = shown ?: return@AnimatedVisibility
         val shape = RoundedCornerShape(28.dp)
+        // Kart sağa sürüklenip bırakılınca kapanır; az çekilirse yerine yaylanır. İçerideki kendi
+        // yatay hareketler (kapak kaydırma, ilerleme çubuğu) önce davranır ve sürüklemeyi tüketir.
+        val drag = remember { androidx.compose.animation.core.Animatable(0f) }
+        val dragScope = androidx.compose.runtime.rememberCoroutineScope()
+        val closeAt = with(androidx.compose.ui.platform.LocalDensity.current) { 140.dp.toPx() }
+        androidx.compose.runtime.LaunchedEffect(panel) { if (panel != null) drag.snapTo(0f) }
         Box(
             Modifier.fillMaxSize()
+                .graphicsLayer {
+                    translationX = drag.value
+                    alpha = 1f - (drag.value / (closeAt * 4f)).coerceIn(0f, 0.4f)
+                }
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            if (drag.value > closeAt) onClose()
+                            else dragScope.launch { drag.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.75f)) }
+                        },
+                        onDragCancel = { dragScope.launch { drag.animateTo(0f) } },
+                    ) { change, dx ->
+                        change.consume()
+                        // Yalnızca sağa (kapatma yönüne) gider; sola çekmek kartı yerinden oynatmaz.
+                        dragScope.launch { drag.snapTo((drag.value + dx).coerceAtLeast(0f)) }
+                    }
+                }
                 .padding(
                     start = when {
                         p == UfukPanel.Climate -> 0.dp

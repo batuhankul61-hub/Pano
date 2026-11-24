@@ -37,7 +37,7 @@ object VehicleImage {
                 .map { String.format(it, type) }
                 .map { res.getIdentifier(it, "drawable", PLUGINS) }
                 .firstOrNull { it != 0 }
-                ?.let { id -> (res.getDrawable(id, null) as? BitmapDrawable)?.bitmap?.let(::trimTransparent)?.asImageBitmap() }
+                ?.let { id -> (res.getDrawable(id, null) as? BitmapDrawable)?.bitmap?.let(::trimTransparent)?.let(::featherEdges)?.asImageBitmap() }
         }.onFailure { Log.i(TAG, "araç görseli yok: ${it.message}") }
             .getOrNull()
             ?.also {
@@ -53,6 +53,43 @@ object VehicleImage {
         val value = sp.getMethod("get", String::class.java).invoke(null, "persist.sys.car.type") as String
         value.trim().toIntOrNull()
     }.getOrNull()?.takeIf { it > 0 }
+
+    /**
+     * Görselin dört kenarını yumuşakça saydamlaştırır. BYD görselinin açık renkli bir zemini var;
+     * Pano'nun zemininde dikdörtgenin köşeleri keskin bir geçiş olarak görünüyordu. Kenardan
+     * [FEATHER] oranında içeriye kadar saydamlık yumuşak bir eğriyle (smoothstep) artar.
+     */
+    private fun featherEdges(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w < 8 || h < 8) return src
+        val out = src.copy(Bitmap.Config.ARGB_8888, true) ?: return src
+        val fx = FloatArray(w) { ramp(it, w) }
+        val fy = FloatArray(h) { ramp(it, h) }
+        val row = IntArray(w)
+        for (y in 0 until h) {
+            out.getPixels(row, 0, w, 0, y, w, 1)
+            for (x in 0 until w) {
+                val k = fx[x] * fy[y]
+                if (k >= 1f) continue
+                val p = row[x]
+                val a = ((p ushr 24) * k).toInt()
+                row[x] = (a shl 24) or (p and 0x00FFFFFF)
+            }
+            out.setPixels(row, 0, w, 0, y, w, 1)
+        }
+        return out
+    }
+
+    /** Kenardan uzaklığa göre 0 (kenar) … 1 (iç) saydamlık çarpanı. */
+    private fun ramp(i: Int, n: Int): Float {
+        val edge = minOf(i, n - 1 - i).toFloat() / (n * FEATHER)
+        if (edge >= 1f) return 1f
+        return edge * edge * (3f - 2f * edge)
+    }
+
+    /** Kenarın ne kadarı yumuşatılır (her kenarda boyutun %12'si). */
+    private const val FEATHER = 0.12f
 
     /**
      * Görselin saydam kenarlarını kırpar. BYD görselinde araç tuvalin ortasında değil (sağ altta
