@@ -136,6 +136,8 @@ import app.pano.launcher.weather.WeatherIcon
 import app.pano.launcher.ui.theme.Accent
 import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.ui.theme.linkColor
+import app.pano.launcher.ui.theme.activeColor
+import app.pano.launcher.ui.theme.onActiveColor
 import app.pano.launcher.vehicle.ClimateState
 import app.pano.launcher.vehicle.Gear
 import app.pano.launcher.vehicle.Opening
@@ -1978,19 +1980,8 @@ internal fun NowPlayingScreen(modifier: Modifier) {
                     RoundIconButton(PanoIcons.Next, "Sonraki$unit", { MediaHub.next() }, Color.Transparent, tint, size = 88.dp, iconSize = 40.dp)
                 }
 
-                // Radyo çalmıyorsa radyoya tek dokunuşla geç (aracın radyo ekranı sağ panelde açılır).
-                if (p?.radio == null && Launch.hasRadio(context)) {
-                    Row(
-                        Modifier.padding(top = 24.dp).align(Alignment.CenterHorizontally).height(60.dp)
-                            .clip(RoundedCornerShape(30.dp)).background(c.chip)
-                            .clickable(role = Role.Button, onClickLabel = "Radyoyu aç") { Launch.radio(context) }
-                            .padding(horizontal = 26.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(PanoIcons.Radio, contentDescription = null, tint = c.text, modifier = Modifier.size(26.dp))
-                        Text("Radyo", color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 10.dp))
-                    }
-                }
+                // Kaynak tuşları (Spotify / Radyo / …): uygulamaya girmeden kaynağa geç.
+                SourceButtons(Modifier.padding(top = 24.dp).fillMaxWidth())
             }
         }
     }
@@ -2031,6 +2022,38 @@ private fun ConsumptionWidget(modifier: Modifier) {
 /** Dock düzenleme paneli açık mı (şeride basılı tutunca açılır). */
 private object DockEditing {
     var open by mutableStateOf(false)
+}
+
+/**
+ * Müzik kaynakları için büyük tuşlar: Spotify, Radyo, Bluetooth… Çalan kaynak dolu renkte; dokununca
+ * o kaynak kaldığı yerden çalar, diğeri durur ([MediaHub.switchTo]). Kapalı uygulama açılıp çalınır.
+ */
+@Composable
+private fun SourceButtons(modifier: Modifier) {
+    val c = glass()
+    val context = LocalContext.current
+    val version by MediaHub.sourcesVersion.collectAsState()
+    val playing by MediaHub.state.collectAsState()
+    val sources = remember(version, playing?.packageName, playing?.radio != null, playing?.isPlaying) { MediaHub.sources(context) }
+    if (sources.isEmpty()) return
+    // Çok kaynak olunca (son uygulamalar + Medya + Radyo) taşmasın diye yatay kaydırılır; azsa ortalanır.
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            sources.forEach { s ->
+                val on = s.current
+                Row(
+                    Modifier.height(64.dp).clip(RoundedCornerShape(32.dp)).background(if (on) activeColor() else c.chip)
+                        .clickable(role = Role.Button, onClickLabel = "${s.label} çal") { MediaHub.switchTo(context, s) }
+                        .padding(horizontal = 26.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val fg = if (on) onActiveColor() else c.text
+                    Icon(if (s.radio) PanoIcons.Radio else PanoIcons.Music, contentDescription = null, tint = fg, modifier = Modifier.size(26.dp))
+                    Text(s.label, color = fg, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.padding(start = 10.dp))
+                }
+            }
+        }
+    }
 }
 
 /**

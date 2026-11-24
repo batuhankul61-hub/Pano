@@ -136,7 +136,7 @@ private val CarColumnCompactWidth = 400.dp
 private const val NavNarrowInset = 0.56f
 
 /** Alt çubuğun yüksekliği. */
-private val BarHeight = 112.dp
+internal val BarHeight = 112.dp
 
 /** Sürüşte kısıtlama: araç hareket ediyor **ve** ayarlarda açık. */
 @Composable
@@ -738,7 +738,10 @@ private fun DrivingGate(title: String, onClose: () -> Unit, content: @Composable
 // ───────────────────────── Alt çubuk ─────────────────────────
 
 @Composable
-private fun BottomBar(climate: ClimateState, screen: Screen, panel: UfukPanel?, volume: UfukVolume, onNavigate: (Screen) -> Unit, modifier: Modifier) {
+private fun BottomBar(
+    climate: ClimateState, screen: Screen, panel: UfukPanel?, volume: UfukVolume, onNavigate: (Screen) -> Unit, modifier: Modifier,
+    outside: Boolean = false,
+) {
     val c = LocalPano.current
     val context = LocalContext.current
     val playing by MediaHub.state.collectAsState()
@@ -758,6 +761,9 @@ private fun BottomBar(climate: ClimateState, screen: Screen, panel: UfukPanel?, 
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
             BarApp(PanoIcons.Music, "Müzik", active = panel == UfukPanel.Music) {
                 when {
+                    // Başka uygulamanın üstündeki şeritten: müzik kartı Pano'da açılır.
+                    outside && (playing != null || Launch.hasRadio(context)) -> { AppSheet.openMusic(); onNavigate(Screen.Home) }
+                    outside -> Launch.music(context, null)
                     AppSheet.music -> AppSheet.close()
                     // Hiçbir şey çalmasa da araçta radyo varsa panel açılır: oradan radyo ya da müzik seçilir.
                     playing != null || Launch.hasRadio(context) -> AppSheet.openMusic()
@@ -778,6 +784,20 @@ private fun BottomBar(climate: ClimateState, screen: Screen, panel: UfukPanel?, 
         }
         Box(Modifier.padding(horizontal = 12.dp).width(1.dp).height(48.dp).background(c.hairline))
         VolumeControl(volume)
+    }
+}
+
+/**
+ * Pano arkadayken başka uygulamaların üstünde duran alt şerit ([app.pano.launcher.system.BarOverlay]).
+ * Pano'dakiyle aynı çubuk; kart açan düğmeler Pano'yu o kartla öne getirir ([onOpen]).
+ */
+@Composable
+fun UfukOverlayBar(onOpen: (Screen) -> Unit) {
+    val context = LocalContext.current
+    val climate = remember { app.pano.launcher.vehicle.ClimateStore.load(context) }
+    val volume = rememberUfukVolume(showUi = true)
+    DesignCanvas(designWidth = 1600f, designHeight = BarHeight.value) {
+        BottomBar(climate, Screen.Home, null, volume, onOpen, Modifier.fillMaxSize(), outside = true)
     }
 }
 
@@ -828,7 +848,9 @@ private const val VolumeHudMs = 2_500L
  * Medya sesinin durumu. Alt çubuktaki düğmeler ve haritanın üstündeki gösterge aynı durumu paylaşır.
  * Sistem ses paneli açılmaz (FLAG_SHOW_UI yok); yerine Ufuk'un kendi göstergesi çıkar.
  */
-private class UfukVolume(private val audio: AudioManager?) {
+private class UfukVolume(private val audio: AudioManager?, showUi: Boolean = false) {
+    /** Pano dışında Ufuk'un ses göstergesi yok; o zaman sistemin ses paneli gösterilir. */
+    private val flags = if (showUi) AudioManager.FLAG_SHOW_UI else 0
     val max: Int = (audio?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 1).coerceAtLeast(1)
     var level by mutableIntStateOf(audio?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0)
         private set
@@ -846,7 +868,7 @@ private class UfukVolume(private val audio: AudioManager?) {
     }
 
     fun adjust(direction: Int) {
-        runCatching { audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0) }
+        runCatching { audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, flags) }
         refresh()
         touchedAt = SystemClock.uptimeMillis()
     }
@@ -865,9 +887,9 @@ private class UfukVolume(private val audio: AudioManager?) {
 }
 
 @Composable
-private fun rememberUfukVolume(): UfukVolume {
+private fun rememberUfukVolume(showUi: Boolean = false): UfukVolume {
     val context = LocalContext.current
-    val volume = remember { UfukVolume(context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager) }
+    val volume = remember { UfukVolume(context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager, showUi) }
     // Direksiyondan ya da başka uygulamadan değişen ses de alt çubuğa yansısın.
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {

@@ -114,7 +114,7 @@ object MediaHub {
             it.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
                 ?: it.getString(MediaMetadata.METADATA_KEY_ART_URI)
                 ?: it.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI)
-                ?: it.description?.iconUri?.toString()
+                ?: it.description.iconUri?.toString()
         }?.takeIf { it.isNotBlank() }
         if (uri == null) {
             if (meta != null) android.util.Log.i("MediaHub", "kapak yok; alanlar: ${meta.keySet()}")
@@ -178,7 +178,12 @@ object MediaHub {
         for (c in now) {
             ordered[c.sessionToken] = watched[c.sessionToken] ?: run {
                 val cb = object : MediaController.Callback() {
-                    override fun onPlaybackStateChanged(state: PlaybackState?) = choose()
+                    override fun onPlaybackStateChanged(state: PlaybackState?) {
+                        choose()
+                        bumpSources()
+                    }
+                    // Medya merkezi radyo ile USB arasında geçince kaynak adı değişir.
+                    override fun onMetadataChanged(metadata: MediaMetadata?) = bumpSources()
                 }
                 c.registerCallback(cb, mainHandler)
                 c to cb
@@ -186,7 +191,119 @@ object MediaHub {
         }
         watched.clear()
         watched.putAll(ordered)
+        rememberSources(now)
+        playPendingIfReady()
         choose()
+        bumpSources()
+    }
+
+    // ───────────────────── Kaynaklar (Spotify / Radyo / …) ─────────────────────
+
+    /** "Şimdi çalıyor"daki kaynak tuşu. [key]: paket adı ya da radyo için "radio". */
+    data class MediaSource(
+        val key: String,
+        val label: String,
+        val packageName: String,
+        val radio: Boolean,
+        val current: Boolean,
+        val playing: Boolean,
+    )
+
+    private const val RADIO_KEY = "radio"
+    private const val PREFS = "pano_media"
+    private const val PREF_RECENT = "recent_sources"
+    private const val MAX_RECENT = 4
+    /** Kaynak sayılmayan oturumlar (telefon görüşmesi). */
+    private val IGNORED = setOf("com.android.server.telecom")
+
+    /** Kaynak tuşları yeniden hesaplansın diye artar (oturum geldi/gitti, çalma değişti). */
+    private val _sourcesVersion = MutableStateFlow(0)
+    val sourcesVersion: StateFlow<Int> = _sourcesVersion.asStateFlow()
+    private fun bumpSources() { _sourcesVersion.value++ }
+
+    /** Kaynağa geçince açılan uygulama: oturumu belirince çalmaya başlatılır (paket, istek anı). */
+    private var pendingPlay: Pair<String, Long>? = null
+
+    private fun MediaController.isRadio(): Boolean {
+        val meta = metadata ?: return false
+        val mode = meta.takeIf { it.containsKey(Radio.MODE_KEY) }?.getLong(Radio.MODE_KEY)
+        return Radio.parse(packageName, mode, meta.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty(), meta.getString(MediaMetadata.METADATA_KEY_ARTIST).orEmpty()) != null
+    }
+
+    private fun keyOf(c: MediaController) = if (c.packageName == Radio.MEDIA_CENTER && c.isRadio()) RADIO_KEY else c.packageName
+
+    /** Görülen kaynak uygulamaları hatırlanır: kapansalar da tuşları kalır (ör. Spotify). */
+    private fun rememberSources(now: List<MediaController>) {
+        val ctx = appContext ?: return
+        val seen = now.map { it.packageName }.filter { it !in IGNORED && it != Radio.MEDIA_CENTER && it != ctx.packageName }
+        if (seen.isEmpty()) return
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val old = p.getString(PREF_RECENT, "").orEmpty().split(',').filter { it.isNotBlank() }
+        val merged = (seen + old).distinct().take(MAX_RECENT)
+        if (merged != old) p.edit().putString(PREF_RECENT, merged.joinToString(",")).apply()
+    }
+
+    private fun playPendingIfReady() {
+        val (pkg, at) = pendingPlay ?: return
+        if (android.os.SystemClock.uptimeMillis() - at > 15_000) { pendingPlay = null; return }
+        val c = watched.values.map { it.first }.firstOrNull { it.packageName == pkg } ?: return
+        pendingPlay = null
+        if (!c.isPlaying()) runCatching { c.transportControls.play() }
+    }
+
+    private fun labelOf(context: Context, pkg: String): String = when (pkg) {
+        "com.android.bluetooth" -> "Bluetooth"
+        Radio.MEDIA_CENTER -> "Medya"
+        else -> runCatching { context.packageManager.run { getApplicationLabel(getApplicationInfo(pkg, 0)).toString() } }.getOrNull()
+            ?: pkg.substringAfterLast('.').replaceFirstChar { it.uppercase() }
+    }
+
+    /**
+     * Gösterilecek kaynaklar: açık medya oturumları, son kullanılan uygulamalar (kapalı olsalar da)
+     * ve araçta varsa radyo. Sırası sabit: uygulamalar son kullanılma sırasıyla, radyo en sonda.
+     */
+    fun sources(context: Context): List<MediaSource> {
+        val all = watched.values.map { it.first }.filter { it.packageName !in IGNORED && it.packageName != context.packageName }
+        val currentKey = controller?.let(::keyOf)
+        val out = LinkedHashMap<String, MediaSource>()
+        val recent = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(PREF_RECENT, "").orEmpty()
+            .split(',').filter { it.isNotBlank() }
+        val order = (all.map(::keyOf).filter { it != RADIO_KEY && it != Radio.MEDIA_CENTER } + recent).distinct()
+        for (key in order) {
+            val c = all.firstOrNull { it.packageName == key }
+            out[key] = MediaSource(key, labelOf(context, key), key, radio = false, current = key == currentKey, playing = c?.isPlaying() == true)
+        }
+        // BYD medya merkezi radyo değil başka modda çalıyorsa (USB/Bluetooth) "Medya" olarak görünür.
+        all.firstOrNull { it.packageName == Radio.MEDIA_CENTER && !it.isRadio() && it.isPlaying() }?.let { c ->
+            out[Radio.MEDIA_CENTER] = MediaSource(Radio.MEDIA_CENTER, "Medya", Radio.MEDIA_CENTER, radio = false, current = currentKey == Radio.MEDIA_CENTER, playing = true)
+        }
+        val radio = all.firstOrNull { it.packageName == Radio.MEDIA_CENTER && it.isRadio() }
+        if (radio != null || app.pano.launcher.Launch.hasRadio(context)) {
+            out[RADIO_KEY] = MediaSource(RADIO_KEY, "Radyo", Radio.MEDIA_CENTER, radio = true, current = currentKey == RADIO_KEY, playing = radio?.isPlaying() == true)
+        }
+        return out.values.toList()
+    }
+
+    /**
+     * Kaynağa geç: çalan durur, seçilen kaldığı yerden çalar. Oturumu yoksa uygulaması açılır ve
+     * oturumu belirince çalmaya başlatılır; radyo yoksa ya da medya merkezi başka moddaysa radyo
+     * ekranı açılır. Araçta bazı uygulamalar ses odağı isteğine uymadığı için çalan ayrıca duraklatılır.
+     */
+    fun switchTo(context: Context, s: MediaSource) {
+        val all = watched.values.map { it.first }
+        val target = if (s.radio) all.firstOrNull { it.packageName == Radio.MEDIA_CENTER && it.isRadio() }
+        else all.firstOrNull { it.packageName == s.packageName }
+        all.filter { it.isPlaying() && it !== target }.forEach { runCatching { it.transportControls.pause() } }
+        if (target != null) {
+            runCatching { target.transportControls.play() }
+            return
+        }
+        if (s.radio) {
+            app.pano.launcher.Launch.radio(context)
+        } else {
+            pendingPlay = s.packageName to android.os.SystemClock.uptimeMillis()
+            app.pano.launcher.Launch.music(context, s.packageName)
+        }
     }
 
     /** Çalan oturum öne çıkar; hiçbiri çalmıyorsa son gösterilen (duraklatılmış) kalır. */

@@ -91,6 +91,22 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.hasCategory(Intent.CATEGORY_HOME)) screen.value = Screen.Home
+        // Uygulamaların üstündeki alt şeritten bir kart istendi (Klima, Uygulamalar…).
+        intent.getStringExtra(app.pano.launcher.system.BarOverlay.EXTRA_SCREEN)
+            ?.let { name -> Screen.entries.firstOrNull { it.name == name } }
+            ?.let { screen.value = it }
+    }
+
+    /** Pano öne gelince kendi alt şeridi var; uygulamaların üstündeki kopya kalkar. */
+    override fun onStart() {
+        super.onStart()
+        app.pano.launcher.system.BarOverlay.hide()
+    }
+
+    /** Pano arkaya düştü (başka bir uygulama açıldı): alt şerit o uygulamanın üstünde kalır. */
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) app.pano.launcher.system.BarOverlay.show(this)
     }
 
     private var lastReturnFor = 0L
@@ -137,8 +153,9 @@ fun PanoApp(screen: Screen, onNavigate: (Screen) -> Unit) {
     app.pano.launcher.ui.ProvideMapHolder {
         Box(Modifier.fillMaxSize()) {
             val layout = LocalStyle.current.layout
-            // CarPlay düzeninde uygulamalar sağ yarıda açılır (Tesla gibi); klasik ve Ufuk'ta tam ekran.
-            Launch.sideBySide = layout == LayoutStyle.CarPlay
+            // Uygulamalar her düzende tam ekran, simgeden büyüyerek açılır. Sağ panelde küçük pencere
+            // (eski CarPlay davranışı) kullanıcı isteğiyle kapatıldı; SidePanel kodu duruyor.
+            Launch.sideBySide = false
             when (layout) {
                 LayoutStyle.CarPlay -> CarPlayApp(screen, climate, onNavigate)
                 LayoutStyle.Ufuk -> app.pano.launcher.ui.UfukApp(screen, climate, onNavigate)

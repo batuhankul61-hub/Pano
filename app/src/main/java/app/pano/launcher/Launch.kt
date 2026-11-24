@@ -29,11 +29,25 @@ object Launch {
     var lastLaunchAt: Long = 0L
         private set
 
-    /** İkondan büyüyerek açılma (iOS gibi). Sınır yoksa sistemin varsayılan geçişi kullanılır. */
-    private fun options(anchor: LaunchAnchor?): Bundle? {
-        val b = anchor?.bounds ?: return null
-        if (b.width() <= 0 || b.height() <= 0) return null
-        return ActivityOptions.makeClipRevealAnimation(anchor.view, b.left, b.top, b.width(), b.height()).toBundle()
+    /**
+     * Uygulama dokunulan simgeden büyüyerek, tam ekran açılır (iOS gibi: "uygulamanın içine girmek").
+     *
+     * Tam ekran açıkça istenir: Android 10 bir görevin pencere modunu hatırlıyor; eskiden sağ panelde
+     * küçük pencere (freeform) olarak açılmış uygulamalar sonra da küçük pencere olarak geliyordu.
+     * Sınır yoksa yalnızca tam ekran istenir, geçiş sistemin varsayılanıdır.
+     */
+    private fun options(anchor: LaunchAnchor?): Bundle {
+        val b = anchor?.bounds?.takeIf { it.width() > 0 && it.height() > 0 }
+        val o = if (anchor != null && b != null) {
+            ActivityOptions.makeScaleUpAnimation(anchor.view, b.left, b.top, b.width(), b.height())
+        } else {
+            ActivityOptions.makeBasic()
+        }
+        runCatching {
+            // WINDOWING_MODE_FULLSCREEN = 1 (gizli API; SidePanel da aynı yöntemle freeform istiyordu).
+            ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType).invoke(o, 1)
+        }.onFailure { Log.w("Launch", "tam ekran istenemedi: ${it.javaClass.simpleName}") }
+        return o.toBundle()
     }
 
     /**
@@ -55,7 +69,9 @@ object Launch {
 
     private fun start(context: Context, intent: Intent, failMessage: String, anchor: LaunchAnchor? = null, side: Boolean = false) {
         try {
-            val activity = if (side && sideBySide) context.findActivity() else null
+            // Pano bölünmüş ekrandaysa uygulama her düzende diğer yarıda açılır; tam ekran istemek
+            // bölünmüş ekranı bozardı.
+            val activity = if (side) context.findActivity() else null
             var panel = false
             val opts = when {
                 activity == null -> options(anchor)
@@ -63,6 +79,7 @@ object Launch {
                     intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
                     ActivityOptions.makeBasic().toBundle()
                 }
+                !sideBySide -> options(anchor)
                 else -> {
                     val pkg = intent.component?.packageName ?: intent.`package`
                         ?: context.packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName
