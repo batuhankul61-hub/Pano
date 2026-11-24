@@ -9,8 +9,6 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
-import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.NoiseSuppressor
 import android.os.SystemClock
 import android.util.Log
 import java.util.concurrent.LinkedBlockingQueue
@@ -30,40 +28,92 @@ import kotlin.math.sqrt
 class LiveMic(
     private val onChunk: (ByteArray, Float) -> Unit,
     private val onError: (String) -> Unit,
+    /** Etkin kayıtların biçimini sormak için (araçta BYD asistanının açık tuttuğu biçimle eşleşmek). */
+    private val audio: AudioManager? = null,
 ) {
     @Volatile private var running = false
+
+    /**
+     * Denenecek kayıt biçimleri, sırayla. Araçta (BYD DiLink 3.0) BYD'nin asistanı mikrofonu "Hey BYD"
+     * için sürekli açık tutuyor (4 ya da 5 kanal, 16 kHz, ses tanıma kaynağı) ve donanım aynı anda tek
+     * akışa ses veriyor: Pano ayrı bir akış açınca yalnızca sıfır alıyordu. Android 10 birebir aynı
+     * biçimdeki kaydı mevcut akışa bağlayabildiği için önce o biçim, sonra 5/4/2 kanal, en son mono
+     * denenir. Bir biçimden 3 sn yalnızca sıfır gelirse sıradakine geçilir; çalışan biçim hatırlanır.
+     */
+    private fun candidates(): List<Int> {
+        val active = runCatching {
+            audio?.activeRecordingConfigurations.orEmpty()
+                .filter { it.clientAudioSource == MediaRecorder.AudioSource.VOICE_RECOGNITION && it.clientFormat.sampleRate == LiveProtocol.INPUT_RATE }
+                .map { it.clientFormat.channelCount }
+        }.getOrDefault(emptyList())
+        return (listOfNotNull(lastGood) + active + CHANNEL_TRIES).distinct()
+    }
 
     /** RECORD_AUDIO izni çağırandan önce denetlenir. */
     @SuppressLint("MissingPermission")
     fun start(): Boolean {
         if (running) return true
         val rate = LiveProtocol.INPUT_RATE
-        // Araçta (BYD DiLink 3.0) mikrofon 5 kanallı bir dizi; BYD'nin kendi ses tanıması onu 5 kanal
-        // okuyor. Tek kanal istenince sürücü ilk kanalı veriyor ve o kanal araçta yalnızca sıfır
-        // döndürüyordu. Bu yüzden önce çok kanallı denenir, en güçlü kanal kullanılır ([pickLoudest]).
-        val r = CHANNEL_TRIES.firstNotNullOfOrNull { n -> open(rate, n)?.also { channels = n } }
+        val tries = candidates().toMutableList()
+        var r: AudioRecord? = null
+        while (r == null && tries.isNotEmpty()) {
+            val n = tries.removeAt(0)
+            r = open(rate, n)?.takeIf { rec ->
+                val ok = runCatching { rec.startRecording() }.isSuccess && rec.recordingState == AudioRecord.RECORDSTATE_RECORDING
+                if (!ok) rec.release()
+                ok
+            }
+            if (r != null) channels = n
+        }
         if (r == null) {
             Log.w(TAG, "mikrofon açılamadı")
             return false
         }
-        // Hoparlörden gelen asistan sesini bastırmaya yardım eder (cihaz destekliyorsa).
-        val aec = if (AcousticEchoCanceler.isAvailable()) runCatching { AcousticEchoCanceler.create(r.audioSessionId)?.apply { enabled = true } }.getOrNull() else null
-        val ns = if (NoiseSuppressor.isAvailable()) runCatching { NoiseSuppressor.create(r.audioSessionId)?.apply { enabled = true } }.getOrNull() else null
-        val started = runCatching { r.startRecording() }.isSuccess && r.recordingState == AudioRecord.RECORDSTATE_RECORDING
-        if (!started) {
-            Log.w(TAG, "mikrofon kayda başlamadı (başka bir uygulama kullanıyor olabilir)")
-            release(r, aec, ns)
-            return false
-        }
         running = true
-        Thread({ loop(r, rate) ; release(r, aec, ns) }, "PanoAsistanMikrofon").start()
-        Log.i(TAG, "mikrofon açık ($channels kanal, yankı bastırma: ${aec != null}, gürültü: ${ns != null})")
+        Thread({
+            var rec: AudioRecord = r
+            while (true) {
+                val end = loop(rec, rate)
+                runCatching { rec.stop() }
+                runCatching { rec.release() }
+                if (end != MicEnd.Muted || !running) { report(end); break }
+                // Bu biçim yalnızca sessizlik verdi: sıradakini dene.
+                Log.w(TAG, "$channels kanaldan yalnızca sessizlik geldi; sıradaki biçim deneniyor")
+                var next: AudioRecord? = null
+                while (next == null && tries.isNotEmpty() && running) {
+                    val n = tries.removeAt(0)
+                    next = open(rate, n)?.takeIf { x ->
+                        val ok = runCatching { x.startRecording() }.isSuccess && x.recordingState == AudioRecord.RECORDSTATE_RECORDING
+                        if (!ok) x.release()
+                        ok
+                    }
+                    if (next != null) { channels = n; Log.i(TAG, "mikrofon yeniden açıldı ($n kanal)") }
+                }
+                if (next == null) { report(MicEnd.Muted); break }
+                rec = next
+            }
+        }, "PanoAsistanMikrofon").start()
+        Log.i(TAG, "mikrofon açık ($channels kanal; sıradaki biçimler: $tries)")
         return true
+    }
+
+    private fun report(end: MicEnd) {
+        when (end) {
+            MicEnd.Stopped -> Unit
+            MicEnd.ReadErrors -> {
+                Log.w(TAG, "mikrofon okunamıyor; kapatılıyor")
+                if (running) { running = false; onError("Mikrofon okunamıyor.") }
+            }
+            MicEnd.Muted -> {
+                Log.w(TAG, "mikrofondan yalnızca sessizlik geliyor; kapatılıyor")
+                if (running) { running = false; onError("Mikrofon başka bir uygulamada (araç asistanı?).") }
+            }
+        }
     }
 
     @Volatile private var channels = 1
 
-    /** [n] kanallı (1 = mono) kayıt açar; olmazsa null. */
+    /** [n] kanallı (1 = mono) kayıt açar; olmazsa null. Efekt eklenmez: mevcut akışa bağlanmayı engelleyebilir. */
     @SuppressLint("MissingPermission")
     private fun open(rate: Int, n: Int): AudioRecord? {
         val format = AudioFormat.Builder().setSampleRate(rate).setEncoding(AudioFormat.ENCODING_PCM_16BIT).run {
@@ -83,8 +133,10 @@ class LiveMic(
         return r
     }
 
-    private fun loop(r: AudioRecord, rate: Int) {
+    /** Bir biçimle okur; bitiş nedenini döndürür. Ses geldiyse biçim sonraki oturumlar için hatırlanır. */
+    private fun loop(r: AudioRecord, rate: Int): MicEnd {
         val n = channels
+        var heard = false
         val buf = ByteArray(rate / 25 * 2) // 40 ms, mono
         val multi = ByteArray(buf.size * n)
         val energy = FloatArray(n)
@@ -108,32 +160,23 @@ class LiveMic(
                 }
             },
             isRunning = { running },
-            onChunk = onChunk,
+            onChunk = { chunk, level ->
+                if (!heard && level > 0f) {
+                    heard = true
+                    if (lastGood != n) { lastGood = n; Log.i(TAG, "mikrofondan ses geliyor ($n kanal); bu biçim hatırlandı") }
+                }
+                onChunk(chunk, level)
+            },
             now = SystemClock::uptimeMillis,
             sleep = SystemClock::sleep,
         )
-        when (end) {
-            MicEnd.Stopped -> Unit
-            MicEnd.ReadErrors -> {
-                Log.w(TAG, "mikrofon okunamıyor; kapatılıyor")
-                if (running) { running = false; onError("Mikrofon okunamıyor.") }
-            }
-            MicEnd.Muted -> {
-                Log.w(TAG, "mikrofondan yalnızca sessizlik geliyor; kapatılıyor")
-                if (running) { running = false; onError("Mikrofon başka bir uygulamada (araç asistanı?).") }
-            }
-        }
+        // Bu biçim hiç ses vermediyse bir dahaki oturumda önce denenmesin.
+        if (end == MicEnd.Muted && lastGood == n) lastGood = null
+        return end
     }
 
     /** Okuma döngüsünün neden bittiği. */
     internal enum class MicEnd { Stopped, ReadErrors, Muted }
-
-    private fun release(r: AudioRecord, aec: AcousticEchoCanceler?, ns: NoiseSuppressor?) {
-        runCatching { r.stop() }
-        runCatching { r.release() }
-        runCatching { aec?.release() }
-        runCatching { ns?.release() }
-    }
 
     /** Döngüyü durdurur; kaynakları okuma iş parçacığı en geç bir okuma (40 ms) sonra bırakır. */
     fun stop() {
@@ -146,9 +189,11 @@ class LiveMic(
         private const val MAX_ERRORS = 10
         private const val ERROR_WAIT_MS = 50L
         /** Bu kadar süre tam sıfır gelirse mikrofon başka yerde demektir. */
-        internal const val MUTE_LIMIT_MS = 3_000L
+        internal const val MUTE_LIMIT_MS = 2_000L
         /** Denenecek kanal sayıları: araçtaki 5 kanallı dizi, olası 4/2 kanallılar, en son mono. */
         private val CHANNEL_TRIES = listOf(5, 4, 2, 1)
+        /** Son oturumda ses veren kanal sayısı; sonraki oturum önce bunu dener. */
+        @Volatile private var lastGood: Int? = null
 
         /**
          * Çok kanallı PCM'den [out]'a tek kanal çıkarır: kanal başına enerji yavaşça ortalanır ([energy],

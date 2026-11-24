@@ -100,6 +100,8 @@ object PanoAssistant {
     private var speaker: LiveSpeaker? = null
     private var focus: LiveFocus? = null
     private var backend: AssistantBackend? = null
+    /** Mikrofon, etkin kayıtların biçimini buradan sorar ([LiveMic]). */
+    private var audioManager: android.media.AudioManager? = null
     private var ticker: Job? = null
     private val toolJobs = ConcurrentHashMap<String, Job>()
 
@@ -174,6 +176,7 @@ object PanoAssistant {
         sessionLogged = true
         apiKey = key
         backend = PanoBackend(context)
+        audioManager = context.applicationContext.getSystemService(android.media.AudioManager::class.java)
         focus = LiveFocus(context.applicationContext).also { it.acquire() }
         val sp = LiveSpeaker()
         if (!sp.start()) { fail("Ses çıkışı açılamadı."); return }
@@ -327,7 +330,7 @@ object PanoAssistant {
                 lastActivity = SystemClock.uptimeMillis()
                 if (mic == null) {
                     val g = generation
-                    val m = LiveMic(::onMic) { message -> scope.launch { if (g == generation) fail(message) } }
+                    val m = LiveMic(::onMic, { message -> scope.launch { if (g == generation) fail(message) } }, audioManager)
                     if (!m.start()) { fail("Mikrofon açılamadı (araç asistanı kullanıyor olabilir)."); return@launch }
                     mic = m
                 }

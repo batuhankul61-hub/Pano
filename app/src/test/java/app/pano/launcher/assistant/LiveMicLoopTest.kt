@@ -52,8 +52,9 @@ class LiveMicLoopTest {
         // Her okuma 40 ms sürsün ve sıfır döndürsün.
         val end = LiveMic.readLoop(buf, { b -> clock.t += 40; b.fill(0); b.size }, { true }, { _, _ -> chunks++ }, { clock.t }, clock::sleep)
         assertEquals(LiveMic.MicEnd.Muted, end)
-        // ~3 sn boyunca parçalar akmaya devam eder, sonra kesilir.
-        assertTrue("parça sayısı: $chunks", chunks in 70..80)
+        // ~MUTE_LIMIT_MS boyunca parçalar akmaya devam eder, sonra kesilir.
+        val expected = (LiveMic.MUTE_LIMIT_MS / 40).toInt()
+        assertTrue("parça sayısı: $chunks", chunks in expected - 5..expected + 5)
     }
 
     @Test
