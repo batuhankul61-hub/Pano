@@ -833,11 +833,12 @@ private fun HomeButton(onClick: () -> Unit) {
 }
 
 /**
- * Alt çubuktaki sıcaklık yazısı. İki bölge her zaman aynı biçimde: araç yarım derece kabul ediyorsa
- * hep bir ondalık ("22,0°", "21,5°"), tam derece kabul ediyorsa hiç ("22°").
+ * Alt çubuktaki sıcaklık yazısı; klima kartıyla aynı biçim ([shortTemp]): "22,5°", tam derecede "21°".
+ * Kutu sabit genişlikte ve rakamlar eşit genişlikte olduğu için biçim değişince şerit oynamaz.
+ * Araç yalnızca tam derece kabul ediyorsa değer en yakın dereceye yuvarlanır.
  */
 internal fun barTempText(t: Float, step: Float): String =
-    if (step >= 1f) "${Math.round(t)}°" else String.format(trLocale, "%.1f°", t)
+    if (step >= 1f) "${Math.round(t)}°" else app.pano.launcher.vehicle.shortTemp(t)
 
 /** Rakamlar eşit genişlikte (Inter "tnum"): sıcaklık değişince şerit oynamaz. */
 @Composable
