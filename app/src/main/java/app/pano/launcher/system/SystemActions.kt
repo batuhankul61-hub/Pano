@@ -76,9 +76,11 @@ object SystemActions {
 }
 
 /**
- * Sistem düğmelerine basmak için (geri, son uygulamalar, yarım ekran). Ekran içeriğini okumaz;
- * yalnızca "pencere değişti" olaylarından öndeki uygulamanın paket adını alır ([ForegroundApp]:
- * alt şerit aracın kendi ana ekranında gizlenir). Yapılandırma res/xml/pano_accessibility.xml'de.
+ * Sistem düğmelerine basmak için (geri, son uygulamalar, yarım ekran). "Pencere değişti"
+ * olaylarından öndeki uygulamanın paket adını alır ([ForegroundApp]: alt şerit aracın kendi ana
+ * ekranında gizlenir). Pencere içeriğine yalnızca [FreeformFix] bakar: küçük pencerede kalmış
+ * bir uygulama tam ekran açılırken çubuğundaki "büyüt" düğmesine basmak için.
+ * Yapılandırma res/xml/pano_accessibility.xml'de.
  */
 class PanoAccessibility : AccessibilityService() {
     override fun onServiceConnected() {

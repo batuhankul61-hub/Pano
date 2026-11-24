@@ -73,16 +73,19 @@ object Launch {
             // bölünmüş ekranı bozardı.
             val activity = if (side) context.findActivity() else null
             var panel = false
+            val pkg by lazy {
+                intent.component?.packageName ?: intent.`package`
+                    ?: context.packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName
+            }
+            var fullscreen = false
             val opts = when {
-                activity == null -> options(anchor)
+                activity == null -> options(anchor).also { fullscreen = true }
                 activity.isInMultiWindowMode -> {
                     intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
                     ActivityOptions.makeBasic().toBundle()
                 }
-                !sideBySide -> options(anchor)
+                !sideBySide -> options(anchor).also { fullscreen = true }
                 else -> {
-                    val pkg = intent.component?.packageName ?: intent.`package`
-                        ?: context.packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName
                     // Pano önce çubuklara yer açar (panel kayar), panelin yeni yeri ölçülünce açılır.
                     if (app.pano.launcher.system.SidePanel.prepare()) {
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -90,11 +93,13 @@ object Launch {
                         }, 150)
                         return
                     }
-                    app.pano.launcher.system.SidePanel.options(pkg)?.also { panel = true } ?: options(anchor)
+                    app.pano.launcher.system.SidePanel.options(pkg)?.also { panel = true }
+                        ?: options(anchor).also { fullscreen = true }
                 }
             }
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts)
             if (panel && activity != null) app.pano.launcher.system.SidePanel.opened(activity, intent)
+            else if (fullscreen) app.pano.launcher.system.FreeformFix.ensureFullscreen(context, pkg)
             lastLaunchAt = SystemClock.uptimeMillis()
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(context, failMessage, Toast.LENGTH_SHORT).show()
