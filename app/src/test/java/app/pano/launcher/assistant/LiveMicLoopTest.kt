@@ -117,3 +117,28 @@ class PickLoudestTest {
         assertEquals(1, LiveMic.pickLoudest(click, n, frames, out, energy))
     }
 }
+
+/** Araçta 5 kanal istenince gelen anlamsız veri: sürekli aşırı yüksek seviye başka biçime geçirir. */
+class GarbageDetectTest {
+    @Test fun surekliAsiriYuksekSeviyeBiter() {
+        var t = 0L
+        val buf = ByteArray(1280)
+        // Rastgele 16 bit gürültü: seviye ~0,58.
+        val rnd = java.util.Random(1)
+        val end = LiveMic.readLoop(buf, { b -> t += 40; rnd.nextBytes(b); b.size }, { t < 10_000 }, { _, _ -> }, { t }, { t += it })
+        assertEquals(LiveMic.MicEnd.Garbage, end)
+        assertTrue("süre: $t", t in LiveMic.GARBAGE_MS..LiveMic.GARBAGE_MS + 200)
+    }
+
+    @Test fun yuksekSesliKonusmaAraliklariylaBitmez() {
+        var t = 0L
+        val buf = ByteArray(1280)
+        // 1 sn yüksek, 0,3 sn sessiz: gerçek konuşma gibi; 6 sn sonra durdurulur.
+        val end = LiveMic.readLoop(
+            buf,
+            { b -> t += 40; val loud = (t % 1300) < 1000; for (i in b.indices step 2) { val s = if (loud) (if (i % 4 == 0) 16000 else -16000) else 50; b[i] = s.toByte(); b[i + 1] = (s shr 8).toByte() }; b.size },
+            { t < 6_000 }, { _, _ -> }, { t }, { t += it },
+        )
+        assertEquals(LiveMic.MicEnd.Stopped, end)
+    }
+}

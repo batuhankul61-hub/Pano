@@ -34,11 +34,15 @@ class LiveMic(
     @Volatile private var running = false
 
     /**
-     * Denenecek kayıt biçimleri, sırayla. Araçta (BYD DiLink 3.0) BYD'nin asistanı mikrofonu "Hey BYD"
-     * için sürekli açık tutuyor (4 ya da 5 kanal, 16 kHz, ses tanıma kaynağı) ve donanım aynı anda tek
-     * akışa ses veriyor: Pano ayrı bir akış açınca yalnızca sıfır alıyordu. Android 10 birebir aynı
-     * biçimdeki kaydı mevcut akışa bağlayabildiği için önce o biçim, sonra 5/4/2 kanal, en son mono
-     * denenir. Bir biçimden 3 sn yalnızca sıfır gelirse sıradakine geçilir; çalışan biçim hatırlanır.
+     * Denenecek kayıt biçimleri, sırayla: son çalışan, mono, sistemde etkin kaydın biçimi, 5/4/2 kanal.
+     *
+     * Araçta (BYD DiLink 3.0, 24.11.2026 denemeleri):
+     * - BYD'nin asistanı "Hey BYD" için mikrofonu açık tutarken Pano'ya hiçbir biçimde ses gelmiyor
+     *   (yalnızca sıfır; aynı biçimi istemek de akışı paylaştırmıyor).
+     * - Mikrofon boştayken 5 kanal istenince ilk iki kanaldan sürekli ~0,5 seviyesinde anlamsız veri
+     *   geliyor (gerçek ses değil); bu yüzden mono önce denenir.
+     * Bir biçimden [MUTE_LIMIT_MS] yalnızca sıfır ya da [GARBAGE_MS] sürekli aşırı yüksek seviye gelirse
+     * sıradakine geçilir; ses veren biçim hatırlanır.
      */
     private fun candidates(): List<Int> {
         val active = runCatching {
@@ -46,7 +50,7 @@ class LiveMic(
                 .filter { it.clientAudioSource == MediaRecorder.AudioSource.VOICE_RECOGNITION && it.clientFormat.sampleRate == LiveProtocol.INPUT_RATE }
                 .map { it.clientFormat.channelCount }
         }.getOrDefault(emptyList())
-        return (listOfNotNull(lastGood) + active + CHANNEL_TRIES).distinct()
+        return (listOfNotNull(lastGood) + 1 + active + CHANNEL_TRIES).distinct()
     }
 
     /** RECORD_AUDIO izni çağırandan önce denetlenir. */
@@ -76,9 +80,9 @@ class LiveMic(
                 val end = loop(rec, rate)
                 runCatching { rec.stop() }
                 runCatching { rec.release() }
-                if (end != MicEnd.Muted || !running) { report(end); break }
-                // Bu biçim yalnızca sessizlik verdi: sıradakini dene.
-                Log.w(TAG, "$channels kanaldan yalnızca sessizlik geldi; sıradaki biçim deneniyor")
+                if ((end != MicEnd.Muted && end != MicEnd.Garbage) || !running) { report(end); break }
+                // Bu biçim ses vermedi (sessizlik ya da anlamsız veri): sıradakini dene.
+                Log.w(TAG, "$channels kanaldan ${if (end == MicEnd.Muted) "yalnızca sessizlik" else "anlamsız (sürekli aşırı yüksek) veri"} geldi; sıradaki biçim deneniyor")
                 var next: AudioRecord? = null
                 while (next == null && tries.isNotEmpty() && running) {
                     val n = tries.removeAt(0)
@@ -89,7 +93,7 @@ class LiveMic(
                     }
                     if (next != null) { channels = n; Log.i(TAG, "mikrofon yeniden açıldı ($n kanal)") }
                 }
-                if (next == null) { report(MicEnd.Muted); break }
+                if (next == null) { report(end); break }
                 rec = next
             }
         }, "PanoAsistanMikrofon").start()
@@ -107,6 +111,10 @@ class LiveMic(
             MicEnd.Muted -> {
                 Log.w(TAG, "mikrofondan yalnızca sessizlik geliyor; kapatılıyor")
                 if (running) { running = false; onError("Mikrofon başka bir uygulamada (araç asistanı?).") }
+            }
+            MicEnd.Garbage -> {
+                Log.w(TAG, "mikrofondan anlamsız veri geliyor; kapatılıyor")
+                if (running) { running = false; onError("Mikrofondan anlaşılır ses alınamıyor.") }
             }
         }
     }
@@ -170,13 +178,13 @@ class LiveMic(
             now = SystemClock::uptimeMillis,
             sleep = SystemClock::sleep,
         )
-        // Bu biçim hiç ses vermediyse bir dahaki oturumda önce denenmesin.
-        if (end == MicEnd.Muted && lastGood == n) lastGood = null
+        // Bu biçim ses vermediyse bir dahaki oturumda önce denenmesin.
+        if ((end == MicEnd.Muted || end == MicEnd.Garbage) && lastGood == n) lastGood = null
         return end
     }
 
-    /** Okuma döngüsünün neden bittiği. */
-    internal enum class MicEnd { Stopped, ReadErrors, Muted }
+    /** Okuma döngüsünün neden bittiği. [Garbage]: sürekli aşırı yüksek seviye (biçim yanlış yorumlanıyor). */
+    internal enum class MicEnd { Stopped, ReadErrors, Muted, Garbage }
 
     /** Döngüyü durdurur; kaynakları okuma iş parçacığı en geç bir okuma (40 ms) sonra bırakır. */
     fun stop() {
@@ -192,6 +200,9 @@ class LiveMic(
         internal const val MUTE_LIMIT_MS = 2_000L
         /** Denenecek kanal sayıları: araçtaki 5 kanallı dizi, olası 4/2 kanallılar, en son mono. */
         private val CHANNEL_TRIES = listOf(5, 4, 2, 1)
+        /** Bu seviyenin üstü [GARBAGE_MS] boyunca hiç düşmezse veri gerçek ses değildir (rastgele gürültü ~0,58). */
+        internal const val GARBAGE_LEVEL = 0.3f
+        internal const val GARBAGE_MS = 1_500L
         /** Son oturumda ses veren kanal sayısı; sonraki oturum önce bunu dener. */
         @Volatile private var lastGood: Int? = null
 
@@ -238,6 +249,7 @@ class LiveMic(
         ): MicEnd {
             var errors = 0
             var silentSince = -1L
+            var loudSince = -1L
             while (isRunning()) {
                 val n = read(buf)
                 if (n <= 0) {
@@ -256,6 +268,14 @@ class LiveMic(
                     else if (t - silentSince > MUTE_LIMIT_MS) return MicEnd.Muted
                 } else {
                     silentSince = -1L
+                }
+                // Konuşma bile bu seviyede kesintisiz kalmaz: biçim yanlış yorumlanıyordur.
+                if (level > GARBAGE_LEVEL) {
+                    val t = now()
+                    if (loudSince < 0) loudSince = t
+                    else if (t - loudSince > GARBAGE_MS) return MicEnd.Garbage
+                } else {
+                    loudSince = -1L
                 }
                 onChunk(chunk, level)
             }
