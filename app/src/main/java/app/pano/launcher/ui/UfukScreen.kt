@@ -153,7 +153,7 @@ private fun ufukDrivingLocked(): Boolean {
 }
 
 /** Haritanın üstünde açılan kart. */
-private enum class UfukPanel { Climate, Apps, Settings, Music, Nav }
+private enum class UfukPanel { Climate, Apps, Settings, Music, Nav, Phone }
 
 @Composable
 fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit) {
@@ -164,11 +164,12 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
         screen == Screen.Settings -> UfukPanel.Settings
         AppSheet.nav -> UfukPanel.Nav
         AppSheet.music -> UfukPanel.Music
+        AppSheet.phone -> UfukPanel.Phone
         else -> null
     }
     // Aynı anda tek kart: yerel ekran açılınca müzik / nereye kapanır; onlar açılınca ekran ana sayfaya döner.
     LaunchedEffect(screen) { if (screen != Screen.Home) AppSheet.close() }
-    val sheetOpen = AppSheet.nav || AppSheet.music
+    val sheetOpen = AppSheet.nav || AppSheet.music || AppSheet.phone
     LaunchedEffect(sheetOpen) { if (sheetOpen && screen != Screen.Home) onNavigate(Screen.Home) }
 
     val volume = rememberUfukVolume()
@@ -698,6 +699,9 @@ private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, columnWidt
                     UfukPanel.Music -> PanelWithTitle("Şimdi çalıyor", onClose) {
                         NowPlayingScreen(Modifier.fillMaxSize().padding(start = 36.dp, end = 36.dp, bottom = 28.dp))
                     }
+                    UfukPanel.Phone -> PanelWithTitle("Telefon", onClose) {
+                        PhoneScreen(Modifier.fillMaxSize().padding(start = 28.dp, end = 32.dp, bottom = 28.dp))
+                    }
                     UfukPanel.Nav -> PanelWithTitle("Nereye?", onClose) {
                         NavScreen(Modifier.fillMaxSize().padding(start = 28.dp, end = 28.dp, bottom = 24.dp)) { onClose() }
                     }
@@ -781,7 +785,9 @@ private fun BottomBar(
                     else -> Launch.music(context, null)
                 }
             }
-            BarApp(PanoIcons.Phone, "Telefon") { Launch.phone(context) }
+            BarApp(PanoIcons.Phone, "Telefon", active = panel == UfukPanel.Phone) {
+                if (AppSheet.phone) AppSheet.close() else AppSheet.openPhone()
+            }
             BarApp(PanoIcons.Fan, "Klima", active = panel == UfukPanel.Climate) { openClimate() }
             BarApp(PanoIcons.Apps, "Uygulamalar", active = panel == UfukPanel.Apps, dimmed = locked) { toggle(Screen.Apps) }
             BarApp(PanoIcons.Sliders, "Ayarlar", active = panel == UfukPanel.Settings, dimmed = locked) { toggle(Screen.Settings) }
@@ -1025,7 +1031,8 @@ private fun OverlayStrip(
                 if (playing != null || Launch.hasRadio(context)) { AppSheet.openMusic(); onOpen(Screen.Home) }
                 else Launch.music(context, null)
             }
-            BarApp(PanoIcons.Phone, "Telefon", compact = true) { Launch.phone(context) }
+            // Telefon kartı Pano'da açılır (kendi telefon ekranımız).
+            BarApp(PanoIcons.Phone, "Telefon", compact = true) { AppSheet.openPhone(); onOpen(Screen.Home) }
             BarApp(PanoIcons.Fan, "Klima", active = climateOpen, compact = true) { onClimate() }
         }
         if (climate.dualZone) {

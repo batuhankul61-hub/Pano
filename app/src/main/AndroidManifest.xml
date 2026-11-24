@@ -18,6 +18,10 @@
     <!-- Uygulama listesini görebilmek için (Android 11+) -->
     <!-- Sağ paneldeki uygulamanın üstüne yuvarlak köşeli çerçeve için (kullanıcı izin verir) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Pano'nun telefon kartı: rehber, son aramalar ve doğrudan arama. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.CALL_PHONE" />
     <!-- Uygulama içi güncelleme: GitHub'dan indirilen yeni sürümü kurmak için (kullanıcı onaylar) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Sistem çubuklarını tüm uygulamalarda gizlemek için; yalnızca adb ile verilebilir (pm grant) -->

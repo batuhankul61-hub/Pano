@@ -39,9 +39,10 @@ import kotlin.math.roundToInt
  * "diğer uygulamaların üzerinde" katmanı olarak durur; aracın alt sistem çubuğu yerine bu kullanılır.
  *
  * Yalnızca Ufuk düzeninde ve "Sistem çubuklarını gizle" açıkken gösterilir (aracın çubuğu o zaman
- * gizli). Şerit, öndeki uygulamanın en alt kısmını örter: Android 10'da başka bir uygulamanın tam
- * ekran penceresini kısaltmanın güvenli bir yolu yok. İzin ("Diğer uygulamaların üzerinde göster")
- * yoksa hiçbir şey gösterilmez.
+ * gizli). Şerit görünürken ekranın altından şerit boyu kadar yer uygulamalardan ayrılır ([Overscan]):
+ * öndeki uygulama şeridin üstünde biter. Bu yapılamazsa (izin yok, Android 10 değil) şerit
+ * uygulamanın en alt kısmını örter. İzin ("Diğer uygulamaların üzerinde göster") yoksa hiçbir şey
+ * gösterilmez.
  *
  * Klima kartı açılınca pencere tüm ekranı kaplar (dışarı dokunmak yalnızca kartı kapatır), ses
  * göstergesi açılınca şeridin üstünde biraz büyür; kapanınca yine şerit boyuna iner ve şeridin
@@ -64,6 +65,10 @@ object BarOverlay {
     private var unitPx = 1f
     /** Aracın ana ekranı önde: şerit görünmez ve dokunuş almaz. */
     private var suppressed = false
+    /** Şeridin boyu (piksel); uygulamalardan bu kadar yer ayrılır. */
+    private var barPx = 0
+    /** Ekranın gerçek yüksekliği (piksel). */
+    private var screenPx = 0
 
     fun wanted(context: Context): Boolean {
         val s = PanoSettings.state.value
@@ -79,6 +84,7 @@ object BarOverlay {
         val m = DisplayMetrics().also { @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(it) }
         val scale = min(m.widthPixels / m.density / 1600f, m.heightPixels / m.density / 900f)
         unitPx = m.density * scale
+        screenPx = m.heightPixels
         val height = (OverlayBarHeight.value * unitPx).roundToInt()
 
         // Ana ekranı tanımak için erişilebilirlik hizmeti gerekir; güvenli ayar izni varsa Pano'nun
@@ -110,7 +116,9 @@ object BarOverlay {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                // Uygulamalardan ayrılan alt boşluğa (overscan) çizilebilsin.
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_OVERSCAN,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.START
@@ -120,6 +128,8 @@ object BarOverlay {
             .onSuccess {
                 view = v; params = lp; owner = o
                 suppressed = false
+                barPx = height
+                applyOverscan(appContext, true)
                 watchForeground(appContext)
             }
             .onFailure { Log.w(TAG, "şerit eklenemedi: $it"); o.destroy() }
@@ -132,6 +142,7 @@ object BarOverlay {
         scope?.cancel()
         scope = null
         UfukOverlayState.dismiss()
+        Overscan.reset(v.context)
         runCatching { v.context.getSystemService(WindowManager::class.java)?.removeViewImmediate(v) }
         owner?.destroy()
         owner = null
@@ -141,11 +152,24 @@ object BarOverlay {
     private fun resize(units: Float?) {
         val v = view ?: return
         val lp = params ?: return
-        val h = units?.let { (it * unitPx).roundToInt() } ?: WindowManager.LayoutParams.MATCH_PARENT
+        // Tüm ekran: alt boşluk açıkken pencere aşağı kaydırılmış; tam ekran boyu verilir ki üstte açık kalmasın.
+        val h = units?.let { (it * unitPx).roundToInt() }
+            ?: if (lp.y != 0 && screenPx > 0) screenPx else WindowManager.LayoutParams.MATCH_PARENT
         if (lp.height == h) return
         lp.height = h
         runCatching { v.context.getSystemService(WindowManager::class.java)?.updateViewLayout(v, lp) }
             .onFailure { Log.w(TAG, "şerit boyu değişmedi: $it") }
+    }
+
+    /**
+     * Alt boşluğu açar/kapatır. Açıkken uygulamaların düzeni boşluğun üstünde biter; şerit penceresi
+     * de boşluk kadar aşağı kaydırılır (yoksa Android onu uygulama alanının dibine koyuyor).
+     */
+    private fun applyOverscan(context: Context, on: Boolean, update: Boolean = true) {
+        val lp = params ?: return
+        val gap = Overscan.set(context, if (on) barPx else 0)
+        lp.y = -gap
+        if (update) view?.let { v -> runCatching { context.getSystemService(WindowManager::class.java)?.updateViewLayout(v, lp) } }
     }
 
     /** Öndeki uygulama aracın ana ekranıysa şerit gizlenir. */
@@ -164,6 +188,8 @@ object BarOverlay {
         val lp = params ?: return
         suppressed = on
         if (on) UfukOverlayState.dismiss()
+        // Aracın ana ekranında şerit yok: alt boşluk da kalkar.
+        applyOverscan(v.context, !on, update = false)
         v.visibility = if (on) View.INVISIBLE else View.VISIBLE
         lp.flags = if (on) lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         else lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()

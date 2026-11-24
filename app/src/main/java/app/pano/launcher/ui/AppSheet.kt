@@ -30,10 +30,23 @@ object AppSheet {
     var nav by mutableStateOf(false)
         private set
 
+    /** Pano'nun kendi telefon kartı (Ufuk) açık mı. */
+    var phone by mutableStateOf(false)
+        private set
+
+    fun openPhone() {
+        app.pano.launcher.system.SidePanel.close()
+        page = null
+        music = false
+        nav = false
+        phone = true
+    }
+
     fun open(title: String, url: String) {
         app.pano.launcher.system.SidePanel.close()
         music = false
         nav = false
+        phone = false
         page = Page(title, url)
     }
 
@@ -41,6 +54,7 @@ object AppSheet {
         app.pano.launcher.system.SidePanel.close()
         page = null
         nav = false
+        phone = false
         music = true
     }
 
@@ -48,6 +62,7 @@ object AppSheet {
         app.pano.launcher.system.SidePanel.close()
         page = null
         music = false
+        phone = false
         nav = true
     }
 
@@ -55,6 +70,7 @@ object AppSheet {
         page = null
         music = false
         nav = false
+        phone = false
     }
 
     /** Panelde açılabilen web uygulamaları (adada sabit durur). */

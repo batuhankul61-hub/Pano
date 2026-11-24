@@ -115,6 +115,11 @@ object PanoIcons {
     val ChevronUp = line("chevron.up", "M5 15l7-7 7 7", 2f)
     val ChevronDown = line("chevron.down", "M5 9l7 7 7-7", 2f)
     val Close = line("xmark", "M6.5 6.5l11 11M17.5 6.5l-11 11", 2f)
+    /** Tuş takımında son rakamı sil. */
+    val Backspace = line("delete.left", "M9 5.5h10a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-6-6.5zM11.5 9.5l5 5M16.5 9.5l-5 5")
+    /** Gelen / giden / cevapsız arama okları. */
+    val CallIn = line("call.in", "M18 6L8 16M8 9v7h7", 2f)
+    val CallOut = line("call.out", "M7 17L17 7M10 7h7v7", 2f)
     val Message = line("message", "M12 4c4.7 0 8.5 3.1 8.5 7s-3.8 7-8.5 7c-1 0-2-.1-2.9-.4L5 19.5l1.2-3.4C4.5 14.8 3.5 13 3.5 11c0-3.9 3.8-7 8.5-7z")
     val Minus = line("minus", "M5 12h14", 2f)
     val Plus = line("plus", "M5 12h14M12 5v14", 2f)
