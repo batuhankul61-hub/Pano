@@ -391,7 +391,10 @@ private fun NowPlayingStrip(compact: Boolean) {
         Row(
             // Sağa/sola kaydırınca önceki/sonraki parça.
             Modifier.fillMaxWidth().height(96.dp).trackSwipe().clip(RoundedCornerShape(24.dp)).background(c.raised)
-                .clickable(role = Role.Button, onClickLabel = "Şimdi çalıyor") { AppSheet.openMusic() }
+                // Dokunuş büyük "Şimdi çalıyor"u açar; açıkken yeniden dokunmak kapatır (dock'taki müzik gibi).
+                .clickable(role = Role.Button, onClickLabel = if (AppSheet.music) "Şimdi çalıyor ekranını kapat" else "Şimdi çalıyor") {
+                    if (AppSheet.music) AppSheet.close() else AppSheet.openMusic()
+                }
                 .padding(start = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
