@@ -38,7 +38,9 @@ import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.ui.theme.activeColor
 import app.pano.launcher.ui.theme.onActiveColor
 import app.pano.launcher.vehicle.ClimateState
-import app.pano.launcher.vehicle.longTemp
+import app.pano.launcher.vehicle.shortTemp
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextAlign
 
 @Composable
 fun ClimateScreen(climate: ClimateState, onBack: () -> Unit) {
@@ -103,19 +105,44 @@ private fun ZonePanel(
                 )
             }
         }
+        // Sürüşte asıl dokunulan yer oklar: rakamın üstünde/altında geniş, dolu zeminli tuşlar.
+        // Dikey dizildikleri için rakamın genişliği değişse de tuşlar yerinden oynamaz.
         Column(
             Modifier.weight(1f).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+            verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
         ) {
-            RoundIconButton(PanoIcons.ChevronUp, "$title sıcaklığını artır", onUp, Color.Transparent, colors.secondary, size = 72.dp, iconSize = 30.dp)
-            BigNumber(longTemp(temp), size = 108.sp, color = tempColor(temp, colors.text), weight = FontWeight.Light)
-            RoundIconButton(PanoIcons.ChevronDown, "$title sıcaklığını düşür", onDown, Color.Transparent, colors.secondary, size = 72.dp, iconSize = 30.dp)
+            TempStepButton(PanoIcons.ChevronUp, "$title sıcaklığını artır", onUp)
+            Text(
+                shortTemp(temp),
+                color = tempColor(temp, colors.text), fontSize = 108.sp, fontWeight = FontWeight.Light,
+                letterSpacing = (-108 * 0.035f).sp, lineHeight = 108.sp, maxLines = 1, softWrap = false,
+                textAlign = TextAlign.Center,
+                // Eşit genişlikli rakamlar: 21° ↔ 22,5° geçişinde rakamlar zıplamasın.
+                style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TempStepButton(PanoIcons.ChevronDown, "$title sıcaklığını düşür", onDown)
         }
         if (seat != null) {
             CardLabel(PanoIcons.Seat, "Koltuk ısıtma", modifier = Modifier.padding(bottom = 12.dp))
             Segmented(listOf("Kapalı", "1", "2", "3"), seat, onSeat)
         }
+    }
+}
+
+/** Sıcaklık artır/azalt tuşu: ≥ 80 dp yükseklik, dolu zemin ve tam kontrastlı ok. */
+@Composable
+private fun TempStepButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+    val colors = LocalPano.current
+    Box(
+        Modifier.widthIn(max = 260.dp).fillMaxWidth().height(84.dp)
+            .clip(RoundedCornerShape(26.dp)).background(colors.raised)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = colors.text, modifier = Modifier.size(44.dp))
     }
 }
 
@@ -141,31 +168,33 @@ private fun CenterPanel(climate: ClimateState, modifier: Modifier) {
             }
         }
 
-        Row(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 14.dp), verticalAlignment = Alignment.Bottom) {
-            CardLabel(PanoIcons.Fan, "Fan")
-            Box(Modifier.weight(1f))
-            val label = when {
-                climate.fan == 0 -> "Kapalı"
-                climate.auto -> "Otomatik · ${climate.fan}"
-                else -> "${climate.fan}"
-            }
-            Text(label, color = colors.text, fontSize = 26.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.6).sp)
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            RoundIconButton(PanoIcons.Minus, "Fanı azalt", { climate.setFanLevel(climate.fan - 1) }, colors.raised, colors.text, size = 56.dp)
-            Row(Modifier.weight(1f).height(56.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (level in 1..7) {
-                    Box(
-                        Modifier.weight(1f).height((16 + level * 5.7f).dp).clip(RoundedCornerShape(7.dp))
-                            .background(if (level <= climate.fan) activeColor() else colors.raised)
-                            .clickable(role = Role.Button) { climate.setFanLevel(level) },
-                    )
+        // Fan bölümü yön ve aç/kapa karoları arasındaki alanın ortasına oturur; boşluk iki yana
+        // eşit dağılır, kartın ortasında amaçsız bir delik kalmaz.
+        Column(Modifier.weight(1f).fillMaxWidth().padding(vertical = 20.dp), verticalArrangement = Arrangement.Center) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalAlignment = Alignment.Bottom) {
+                CardLabel(PanoIcons.Fan, "Fan")
+                Box(Modifier.weight(1f))
+                val label = when {
+                    climate.fan == 0 -> "Kapalı"
+                    climate.auto -> "Otomatik · ${climate.fan}"
+                    else -> "${climate.fan}"
                 }
+                Text(label, color = colors.text, fontSize = 26.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.6).sp)
             }
-            RoundIconButton(PanoIcons.Plus, "Fanı artır", { climate.setFanLevel(climate.fan + 1) }, colors.raised, colors.text, size = 56.dp)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                RoundIconButton(PanoIcons.Minus, "Fanı azalt", { climate.setFanLevel(climate.fan - 1) }, colors.raised, colors.text, size = 72.dp, iconSize = 28.dp)
+                Row(Modifier.weight(1f).height(72.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (level in 1..7) {
+                        Box(
+                            Modifier.weight(1f).height((22 + level * 7.1f).dp).clip(RoundedCornerShape(7.dp))
+                                .background(if (level <= climate.fan) activeColor() else colors.raised)
+                                .clickable(role = Role.Button) { climate.setFanLevel(level) },
+                        )
+                    }
+                }
+                RoundIconButton(PanoIcons.Plus, "Fanı artır", { climate.setFanLevel(climate.fan + 1) }, colors.raised, colors.text, size = 72.dp, iconSize = 28.dp)
+            }
         }
-
-        Box(Modifier.weight(1f))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (climate.dualZone) {
