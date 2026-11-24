@@ -38,17 +38,12 @@ class LiveMic(
     fun start(): Boolean {
         if (running) return true
         val rate = LiveProtocol.INPUT_RATE
-        val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        if (min <= 0) {
-            Log.w(TAG, "mikrofon biçimi desteklenmiyor ($min)")
-            return false
-        }
-        val r = runCatching {
-            AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, rate))
-        }.getOrNull()
-        if (r == null || r.state != AudioRecord.STATE_INITIALIZED) {
+        // Araçta (BYD DiLink 3.0) mikrofon 5 kanallı bir dizi; BYD'nin kendi ses tanıması onu 5 kanal
+        // okuyor. Tek kanal istenince sürücü ilk kanalı veriyor ve o kanal araçta yalnızca sıfır
+        // döndürüyordu. Bu yüzden önce çok kanallı denenir, en güçlü kanal kullanılır ([pickLoudest]).
+        val r = CHANNEL_TRIES.firstNotNullOfOrNull { n -> open(rate, n)?.also { channels = n } }
+        if (r == null) {
             Log.w(TAG, "mikrofon açılamadı")
-            r?.release()
             return false
         }
         // Hoparlörden gelen asistan sesini bastırmaya yardım eder (cihaz destekliyorsa).
@@ -62,15 +57,56 @@ class LiveMic(
         }
         running = true
         Thread({ loop(r, rate) ; release(r, aec, ns) }, "PanoAsistanMikrofon").start()
-        Log.i(TAG, "mikrofon açık (yankı bastırma: ${aec != null}, gürültü: ${ns != null})")
+        Log.i(TAG, "mikrofon açık ($channels kanal, yankı bastırma: ${aec != null}, gürültü: ${ns != null})")
         return true
     }
 
+    @Volatile private var channels = 1
+
+    /** [n] kanallı (1 = mono) kayıt açar; olmazsa null. */
+    @SuppressLint("MissingPermission")
+    private fun open(rate: Int, n: Int): AudioRecord? {
+        val format = AudioFormat.Builder().setSampleRate(rate).setEncoding(AudioFormat.ENCODING_PCM_16BIT).run {
+            if (n == 1) setChannelMask(AudioFormat.CHANNEL_IN_MONO) else setChannelIndexMask((1 shl n) - 1)
+        }.build()
+        val r = runCatching {
+            AudioRecord.Builder()
+                .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+                .setAudioFormat(format)
+                .setBufferSizeInBytes(rate * 2 * n)
+                .build()
+        }.getOrNull()
+        if (r == null || r.state != AudioRecord.STATE_INITIALIZED || r.channelCount != n) {
+            r?.release()
+            return null
+        }
+        return r
+    }
+
     private fun loop(r: AudioRecord, rate: Int) {
-        val buf = ByteArray(rate / 25 * 2) // 40 ms
+        val n = channels
+        val buf = ByteArray(rate / 25 * 2) // 40 ms, mono
+        val multi = ByteArray(buf.size * n)
+        val energy = FloatArray(n)
+        var lastLog = 0L
         val end = readLoop(
             buf = buf,
-            read = { b -> r.read(b, 0, b.size) },
+            read = { b ->
+                if (n == 1) r.read(b, 0, b.size) else {
+                    val got = r.read(multi, 0, multi.size)
+                    if (got <= 0) got else {
+                        val frames = got / (2 * n)
+                        pickLoudest(multi, n, frames, b, energy)
+                        // Hangi kanalın konuşmayı taşıdığı araçta logdan görülsün (2 sn'de bir).
+                        val now = SystemClock.uptimeMillis()
+                        if (now - lastLog > 2_000) {
+                            lastLog = now
+                            Log.i(TAG, "kanal seviyeleri: ${energy.joinToString(" ") { "%.4f".format(java.util.Locale.US, kotlin.math.sqrt(it)) }}")
+                        }
+                        frames * 2
+                    }
+                }
+            },
             isRunning = { running },
             onChunk = onChunk,
             now = SystemClock::uptimeMillis,
@@ -111,6 +147,34 @@ class LiveMic(
         private const val ERROR_WAIT_MS = 50L
         /** Bu kadar süre tam sıfır gelirse mikrofon başka yerde demektir. */
         internal const val MUTE_LIMIT_MS = 3_000L
+        /** Denenecek kanal sayıları: araçtaki 5 kanallı dizi, olası 4/2 kanallılar, en son mono. */
+        private val CHANNEL_TRIES = listOf(5, 4, 2, 1)
+
+        /**
+         * Çok kanallı PCM'den [out]'a tek kanal çıkarır: kanal başına enerji yavaşça ortalanır ([energy],
+         * yaklaşık 1 sn) ve en güçlü kanal kopyalanır. Parça parça kanal atlaması olmasın diye ortalama
+         * kullanılır. Döndürdüğü: seçilen kanal. Saf işlev: birim testleri doğrudan dener.
+         */
+        internal fun pickLoudest(multi: ByteArray, n: Int, frames: Int, out: ByteArray, energy: FloatArray): Int {
+            for (ch in 0 until n) {
+                var sum = 0.0
+                for (f in 0 until frames) {
+                    val i = (f * n + ch) * 2
+                    val s = (multi[i].toInt() and 0xff) or (multi[i + 1].toInt() shl 8)
+                    sum += s.toDouble() * s
+                }
+                val ms = if (frames > 0) (sum / frames / (32768.0 * 32768.0)).toFloat() else 0f
+                energy[ch] += (ms - energy[ch]) * 0.04f // 40 ms parçalar: ~1 sn
+            }
+            var best = 0
+            for (ch in 1 until n) if (energy[ch] > energy[best]) best = ch
+            for (f in 0 until frames) {
+                val i = (f * n + best) * 2
+                out[f * 2] = multi[i]
+                out[f * 2 + 1] = multi[i + 1]
+            }
+            return best
+        }
 
         /**
          * Mikrofon okuma döngüsü. Android'e bağımlı değildir (okuma, saat ve bekleme dışarıdan

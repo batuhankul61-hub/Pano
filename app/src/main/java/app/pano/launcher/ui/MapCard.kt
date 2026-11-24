@@ -614,7 +614,14 @@ private fun startLocationUpdates(context: Context, onLocation: (Location) -> Uni
         .maxByOrNull { it.time }
         ?.let(onLocation)
 
-    val listener = LocationListener { onLocation(it) }
+    // Lambda olarak yazılmamalı: Android 10'da (araç) onProviderDisabled/Enabled/StatusChanged soyut;
+    // GPS kapanınca çağrılıyor ve lambda bunları içermediği için Pano AbstractMethodError ile çöküyordu.
+    val listener = object : LocationListener {
+        override fun onLocationChanged(location: android.location.Location) = onLocation(location)
+        @Deprecated("API 29") override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {}
+    }
     providers.forEach { provider ->
         try {
             manager.requestLocationUpdates(provider, 1_000L, 5f, listener, Looper.getMainLooper())

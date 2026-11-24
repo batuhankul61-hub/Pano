@@ -80,3 +80,39 @@ class LiveMicLoopTest {
         assertEquals(0, reads)
     }
 }
+
+/** Çok kanallı mikrofondan en güçlü kanalın seçilmesi (araçta 5 kanallı dizi). */
+class PickLoudestTest {
+    /** [n] kanal, [frames] kare; kanal [ch]'nin örneği [value(ch, f)]. */
+    private fun pcm(n: Int, frames: Int, value: (Int, Int) -> Int): ByteArray {
+        val b = ByteArray(n * frames * 2)
+        for (f in 0 until frames) for (ch in 0 until n) {
+            val s = value(ch, f)
+            b[(f * n + ch) * 2] = s.toByte(); b[(f * n + ch) * 2 + 1] = (s shr 8).toByte()
+        }
+        return b
+    }
+
+    @Test fun sifirKanalYerineSesliKanal() {
+        val n = 5; val frames = 640
+        val energy = FloatArray(n)
+        val out = ByteArray(frames * 2)
+        // 0. kanal sıfır (araçta tek kanal istenince gelen buydu), 2. kanalda ses var.
+        val multi = pcm(n, frames) { ch, f -> if (ch == 2) (if (f % 2 == 0) 3000 else -3000) else 0 }
+        var chosen = -1
+        repeat(5) { chosen = LiveMic.pickLoudest(multi, n, frames, out, energy) }
+        assertEquals(2, chosen)
+        assertEquals(3000, (out[0].toInt() and 0xff) or (out[1].toInt() shl 8))
+    }
+
+    @Test fun tekParcalikGurultuKanalDegistirmez() {
+        val n = 3; val frames = 640
+        val energy = FloatArray(n)
+        val out = ByteArray(frames * 2)
+        val speech = pcm(n, frames) { ch, f -> if (ch == 1) (if (f % 2 == 0) 2000 else -2000) else 100 }
+        repeat(50) { LiveMic.pickLoudest(speech, n, frames, out, energy) } // 2 sn konuşma
+        // Bir parçalık yüksek tıkırtı 0. kanalda: ortalama nedeniyle seçim 1. kanalda kalır.
+        val click = pcm(n, frames) { ch, f -> if (ch == 0) (if (f % 2 == 0) 7000 else -7000) else 100 }
+        assertEquals(1, LiveMic.pickLoudest(click, n, frames, out, energy))
+    }
+}
