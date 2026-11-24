@@ -178,6 +178,8 @@ object PanoAssistant {
         backend = PanoBackend(context)
         audioManager = context.applicationContext.getSystemService(android.media.AudioManager::class.java)
         focus = LiveFocus(context.applicationContext).also { it.acquire() }
+        // Çalan müzik/radyo asistan boyunca durur (araçta odak isteğine uymuyor), sonunda sürer.
+        app.pano.launcher.media.MediaHub.pauseForAssistant()
         val sp = LiveSpeaker()
         if (!sp.start()) { fail("Ses çıkışı açılamadı."); return }
         speaker = sp
@@ -217,6 +219,7 @@ object PanoAssistant {
         mic?.stop(); mic = null
         speaker?.stop(); speaker = null
         focus?.release(); focus = null
+        app.pano.launcher.media.MediaHub.resumeAfterAssistant()
         backend = null
         apiKey = null
         resumeHandle = null
@@ -412,6 +415,8 @@ object PanoAssistant {
     private fun runTool(call: ToolCall) {
         val b = backend ?: return
         Log.i(TAG, "araç: ${call.name}")
+        // Müziği kullanıcı asistanla kendisi yönetti: oturum sonunda Pano geri açmasın.
+        if (call.name == "media_control" || call.name == "open_app") app.pano.launcher.media.MediaHub.forgetAssistantPause()
         val job = scope.launch {
             val result = AssistantTools.run(call, b)
             toolJobs.remove(call.id)

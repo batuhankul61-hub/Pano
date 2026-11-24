@@ -397,12 +397,14 @@ class LiveSpeaker {
 }
 
 /**
- * Oturum boyunca ses odağı: müzik kısılır (ducking), oturum bitince geri gelir.
+ * Oturum boyunca ses odağı: odağa uyan uygulamalar duraklar (kısmak yetmiyordu: araçta müzik yüksek
+ * kalınca mikrofon konuşmayı duymuyordu), oturum bitince geri gelir. Odağa uymayanları
+ * [app.pano.launcher.media.MediaHub.pauseForAssistant] ayrıca duraklatır.
  * [release] birden çok kez çağrılabilir; yalnızca alınmış odak bırakılır.
  */
 class LiveFocus(context: Context) {
     private val am = context.getSystemService(AudioManager::class.java)
-    private val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+    private val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build(),
         )

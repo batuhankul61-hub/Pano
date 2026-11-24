@@ -245,6 +245,33 @@ object MediaHub {
     fun next() = controller?.transportControls?.skipToNext()
     fun previous() = controller?.transportControls?.skipToPrevious()
 
+    /**
+     * Asistan konuşurken çalanı duraklatır. Araçta Spotify (BYD kabuğu üzerinden) ses odağının "kıs"
+     * isteğine uymuyor; müzik yüksek kalınca mikrofon konuşmayı duyamıyordu. Duraklatılan oturum
+     * hatırlanır, [resumeAfterAssistant] yalnızca onu sürdürür.
+     */
+    private var pausedForAssistant: MediaSession.Token? = null
+
+    fun pauseForAssistant() {
+        val c = controller ?: return
+        if (!c.isPlaying()) return
+        pausedForAssistant = c.sessionToken
+        runCatching { c.transportControls.pause() }
+    }
+
+    /** Asistan bitti: onun duraklattığı oturum hâlâ duruyorsa kaldığı yerden sürer. */
+    fun resumeAfterAssistant() {
+        val token = pausedForAssistant ?: return
+        pausedForAssistant = null
+        val c = watched[token]?.first ?: return
+        if (!c.isPlaying()) runCatching { c.transportControls.play() }
+    }
+
+    /** Kullanıcı asistanla müziği kendisi yönettiyse ("durdur", "sonraki") oturum sonunda geri açılmaz. */
+    fun forgetAssistantPause() {
+        pausedForAssistant = null
+    }
+
     /** Uygulama sarmayı destekliyorsa true; ilerleme çubuğu ancak o zaman sürüklenebilir. */
     fun canSeek(): Boolean =
         (controller?.playbackState?.actions ?: 0L) and PlaybackState.ACTION_SEEK_TO != 0L
