@@ -253,6 +253,8 @@ class LiveMic(
             while (isRunning()) {
                 val n = read(buf)
                 if (n <= 0) {
+                    // Veri gelmedi: "kesintisiz yüksek seviye" de kesilmiş sayılır.
+                    loudSince = -1L
                     // Beklemeden tekrar denemek bir çekirdeği %100 meşgul eder.
                     if (++errors >= MAX_ERRORS) return MicEnd.ReadErrors
                     sleep(ERROR_WAIT_MS)
