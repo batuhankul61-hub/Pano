@@ -648,7 +648,16 @@ private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, columnWidt
         val closeAt = with(androidx.compose.ui.platform.LocalDensity.current) { 140.dp.toPx() }
         androidx.compose.runtime.LaunchedEffect(panel) { if (panel != null) drag.snapTo(0f) }
         Box(
+            // Sürükleme yalnızca kartın kendi alanında: soldaki sütun (müzik şeridi) dokunulabilir kalsın.
             Modifier.fillMaxSize()
+                .padding(
+                    start = when {
+                        p == UfukPanel.Climate -> 0.dp
+                        navNarrow -> columnWidth + (1600.dp - columnWidth) * (1f - NavNarrowInset)
+                        else -> columnWidth
+                    },
+                )
+                .padding(16.dp)
                 .graphicsLayer {
                     translationX = drag.value
                     alpha = 1f - (drag.value / (closeAt * 4f)).coerceIn(0f, 0.4f)
@@ -666,14 +675,7 @@ private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, columnWidt
                         dragScope.launch { drag.snapTo((drag.value + dx).coerceAtLeast(0f)) }
                     }
                 }
-                .padding(
-                    start = when {
-                        p == UfukPanel.Climate -> 0.dp
-                        navNarrow -> columnWidth + (1600.dp - columnWidth) * (1f - NavNarrowInset)
-                        else -> columnWidth
-                    },
-                )
-                .padding(16.dp).clip(shape).background(c.card).border(1.dp, c.hairline, shape),
+                .clip(shape).background(c.card).border(1.dp, c.hairline, shape),
         ) {
             AnimatedContent(
                 p,
