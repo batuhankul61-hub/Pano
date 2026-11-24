@@ -94,6 +94,8 @@ import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.ui.theme.PanoColors
 import app.pano.launcher.vehicle.ClimateState
 import app.pano.launcher.vehicle.Gear
+import app.pano.launcher.vehicle.Opening
+import app.pano.launcher.vehicle.Openings
 import app.pano.launcher.vehicle.VehicleHub
 import app.pano.launcher.vehicle.decimal
 import app.pano.launcher.vehicle.shortTemp
@@ -202,6 +204,7 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
 
 // ───────────────────────── Araç sütunu ─────────────────────────
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun CarColumn(compact: Boolean, modifier: Modifier) {
     val c = LocalPano.current
@@ -262,7 +265,12 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
             v.consumption?.takeIf { !v.isPreview }?.let { "${decimal(it.kwh100)} kWh/100 km" },
         )
         if (chips.isNotEmpty()) {
-            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Dar sütunda (sürüş) üçü tek satıra sığmıyor, tüketim kesiliyordu; sığmayan alt satıra iner.
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 chips.forEach { label ->
                     Text(
                         label, color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
@@ -272,37 +280,15 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
             }
         }
 
-        // Araç kontrolleri çizimin hemen üstünde, ilgili yerin hizasında: bagaj arkada (solda),
-        // kilit ortada, şarj kapağı önde (sağda). Sürüşte gizlenir, çizim büyür.
-        Spacer(Modifier.weight(0.25f))
-        val open = v.openings?.open.orEmpty()
-        AnimatedVisibility(!locked && !compact, enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs))) {
-            val notYet = { Launch.notConnectedYet(context) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                CarHotspot(PanoIcons.Trunk, if (v.openings?.trunk == true) "Bagaj açık" else "Bagaj", notYet, Modifier)
-                CarHotspot(
-                    if (v.locked == false) PanoIcons.Unlock else PanoIcons.Lock,
-                    when (v.locked) { true -> "Kilitli"; false -> "Açık"; null -> "Kilit" },
-                    { app.pano.launcher.vehicle.VehicleControls.toggleLock(context) }, Modifier,
-                )
-                CarHotspot(PanoIcons.Bolt, "Şarj", notYet, Modifier)
-            }
-        }
-        // Açık kapı uyarısı çizimin üstüne bindirilir; sütuna eklenseydi aracı aşağı iterdi.
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            CarIllustration(Modifier.fillMaxSize().padding(vertical = 4.dp), dark = c.isDark, background = Color.Transparent)
-            androidx.compose.animation.AnimatedVisibility(
-                open.isNotEmpty(), Modifier.align(Alignment.TopCenter),
-                enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs)),
-            ) {
-                Text(
-                    open.take(3).joinToString(" · ") { "${it.label} açık" }, color = Accent.Red, fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold, maxLines = 2,
-                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(c.glass)
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                )
-            }
-        }
+        // Araç görseli ve hemen altında, ona ortalı açıklık durumu (görselin alt yazısı gibi).
+        // Durum satırının yüksekliği sabit: uyarı gelip gidince görsel kıpırdamaz.
+        Spacer(Modifier.weight(0.2f))
+        CarIllustration(
+            Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp),
+            dark = c.isDark, background = Color.Transparent,
+        )
+        OpeningsStatus(v.openings, compact)
+        Spacer(Modifier.height(12.dp))
         // Müzik yalnızca bir şey çalıyorsa yer kaplar.
         NowPlayingStrip(compact)
     }
@@ -331,25 +317,62 @@ private fun BatteryReadout(percent: Int?, rangeKm: Int?, c: PanoColors) {
     }
 }
 
-/** Çizimin üstünde etiketli dokunma noktası (≥72 dp). */
+/**
+ * Araç görselinin altındaki, ona ortalı durum satırı. Açık kalan her parça kendi renkli etiketinde
+ * (kapı/bagaj/kaput kırmızı, cam turuncu); hiçbiri açık değilse sakin bir "kapalı" satırı.
+ * Açıklıklar araçtan okunamıyorsa (önizleme) satır boş kalır, uydurma "kapalı" yazılmaz.
+ * Yükseklik sabit: içerik değişince araç görseli yerinden oynamaz.
+ */
 @Composable
-private fun CarHotspot(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier) {
+private fun OpeningsStatus(openings: Openings?, compact: Boolean) {
     val c = LocalPano.current
+    val open = openings?.open.orEmpty()
+    val known = openings != null && !openings.isEmpty
+    // Bir etiket ~195 dp: geniş sütuna iki, dar sütuna (sürüş) bir tane sığıyor; kalanı sayı olarak.
+    val shown = if (compact) 1 else 2
+    Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.Center) {
+        AnimatedContent(
+            targetState = when { open.isNotEmpty() -> open; known -> emptyList(); else -> null },
+            transitionSpec = { fadeIn(tween(UfukMotionMs)) togetherWith fadeOut(tween(UfukMotionMs)) },
+            label = "açıklıklar",
+        ) { items ->
+            when {
+                items == null -> Spacer(Modifier.fillMaxWidth())
+                items.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(PanoIcons.Lock, contentDescription = null, tint = c.tertiary, modifier = Modifier.size(18.dp))
+                    Text(
+                        "Kapılar ve camlar kapalı", color = c.tertiary, fontSize = 17.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    items.take(shown).forEach { OpeningChip(it) }
+                    if (items.size > shown) {
+                        Text(
+                            "+${items.size - shown}", color = c.secondary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OpeningChip(item: Opening) {
+    val c = LocalPano.current
+    val tone = if (item.isMajor) Accent.Red else Color(0xFFFF9F0A)
     Row(
-        modifier.height(72.dp).clip(RoundedCornerShape(36.dp))
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = label }
-            .padding(horizontal = 6.dp),
+        Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(tone.copy(alpha = if (c.isDark) 0.18f else 0.12f))
+            .padding(start = 12.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.height(52.dp).clip(RoundedCornerShape(26.dp)).background(c.glass)
-                .border(1.dp, c.hairline, RoundedCornerShape(26.dp)).padding(start = 14.dp, end = 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, tint = c.text, modifier = Modifier.size(24.dp))
-            Text(label, color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp))
-        }
+        Box(Modifier.size(9.dp).clip(CircleShape).background(tone))
+        Text(
+            "${item.label} açık", color = c.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            modifier = Modifier.padding(start = 8.dp),
+        )
     }
 }
 

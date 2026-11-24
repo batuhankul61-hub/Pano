@@ -166,18 +166,7 @@ private fun VehicleCard(modifier: Modifier) {
             Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp),
             dark = colors.isDark, background = colors.card,
         )
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            val notYet = { Launch.notConnectedYet(context) }
-            VehicleAction(
-                if (locked == false) PanoIcons.Lock else PanoIcons.Unlock,
-                when (locked) { true -> "Kilidi aç"; false -> "Kilitle"; null -> "Kilit" },
-                { app.pano.launcher.vehicle.VehicleControls.toggleLock(context) },
-            )
-            VehicleAction(PanoIcons.Trunk, "Bagaj", notYet)
-            VehicleAction(PanoIcons.Bolt, "Şarj portu", notYet)
-            VehicleAction(PanoIcons.Mirror, "Aynalar", notYet)
-        }
+        // Kilit/bagaj/şarj/ayna düğmeleri araçta komut almadığı için kaldırıldı.
     }
 }
 

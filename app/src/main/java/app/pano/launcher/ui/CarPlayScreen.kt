@@ -1531,26 +1531,7 @@ private fun VehicleWidget(modifier: Modifier) {
             // Açık kapı/bagaj/cam yalnızca araçtan okununca gösterilir; önizlemede hiç yok.
             OpeningsBadge(v.openings?.open.orEmpty(), parked = !driving, Modifier.align(Alignment.TopStart).padding(top = 10.dp))
         }
-
-        // Araç düğmeleri sürüşte gerekmez; kapanınca araç çizimi büyür.
-        AnimatedVisibility(
-            visible = !drivingLocked(),
-            enter = fadeIn(tween(MotionMs)) + expandVertically(tween(MotionMs * 2)),
-            exit = fadeOut(tween(MotionMs / 2)) + shrinkVertically(tween(MotionMs * 2)),
-        ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                val notYet = { Launch.notConnectedYet(context) }
-                val locked = v.locked
-                GlassAction(
-                    if (locked == false) PanoIcons.Unlock else PanoIcons.Lock,
-                    when (locked) { true -> "Kilitli"; false -> "Açık"; null -> "Kilit" },
-                    { app.pano.launcher.vehicle.VehicleControls.toggleLock(context) },
-                )
-                GlassAction(PanoIcons.Trunk, if (v.openings?.trunk == true) "Bagaj açık" else "Bagaj", notYet)
-                GlassAction(PanoIcons.Bolt, "Şarj", notYet)
-                GlassAction(PanoIcons.Mirror, "Aynalar", notYet)
-            }
-        }
+        // Kilit/bagaj/şarj/ayna düğmeleri araçta komut almadığı için kaldırıldı.
     }
 }
 
@@ -1586,23 +1567,6 @@ private fun OpeningsBadge(open: List<Opening>, parked: Boolean, modifier: Modifi
                 Text("+${open.size - 4} daha", color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
         }
-    }
-}
-
-@Composable
-private fun GlassAction(icon: ImageVector, label: String, onClick: () -> Unit) {
-    val c = glass()
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier.pressScale().size(66.dp).clip(CircleShape).background(c.chip)
-                .border(1.dp, Brush.verticalGradient(listOf(c.edgeTop, c.edgeBottom)), CircleShape)
-                .clickable(role = Role.Button, onClick = onClick)
-                .semantics { contentDescription = label },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = null, tint = c.text, modifier = Modifier.size(26.dp))
-        }
-        Text(label, color = c.secondary, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
     }
 }
 
