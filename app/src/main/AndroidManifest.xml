@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Pano Asistan: yalnızca dock'taki düğmeye basınca mikrofon açılır -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Direksiyon tuşuyla, Pano ekranda değilken açılan asistan oturumunda mikrofon susturulmasın -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- Haritanın altındaki adada son kullanılan uygulamalar için (kullanıcı ayrıca izin verir). -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
 
@@ -38,6 +41,8 @@
         <package android:name="com.byd.carsettings.plugins" />
         <!-- Sesli asistan: önce BYD'ninki, yoksa Android'in standart sesli komut / asistan ekranı. -->
         <package android:name="com.byd.vrassistant" />
+        <!-- Aracın radyo ekranı (medya merkezi) -->
+        <package android:name="com.byd.mediacenter" />
         <intent>
             <action android:name="android.intent.action.VOICE_COMMAND" />
         </intent>
@@ -95,6 +100,12 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/pano_accessibility" />
         </service>
+
+        <!-- Pano Asistan: direksiyon tuşuyla arka planda açılan oturum (assistant/VoiceKey.kt) -->
+        <service
+            android:name=".assistant.AssistantForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- Uygulama içi güncellemenin yükleyici sonucu -->
         <receiver

@@ -121,12 +121,14 @@ object Launch {
     private fun resolves(context: Context, intent: Intent) =
         intent.resolveActivity(context.packageManager) != null
 
-    fun music(context: Context, activePackage: String?, anchor: LaunchAnchor? = null) {
+    /** Müzik uygulamasını açar; açılacak bir uygulama bulunamazsa false döner. */
+    fun music(context: Context, activePackage: String?, anchor: LaunchAnchor? = null): Boolean {
         val launch = launchable(context, listOf(activePackage, MEDIA_FRONTENDS[activePackage]))
             ?: Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC).takeIf { resolves(context, it) }
             ?: launchable(context, CAR_MUSIC_APPS)
         if (launch != null) start(context, launch, "Müzik uygulaması açılamadı", anchor, side = true)
         else Toast.makeText(context, "Müzik uygulaması bulunamadı", Toast.LENGTH_SHORT).show()
+        return launch != null
     }
 
     fun phone(context: Context, anchor: LaunchAnchor? = null) {
@@ -185,6 +187,25 @@ object Launch {
         Log.i("Launch", "sesli asistan: ${launch?.let { it.`package` ?: it.action } ?: "yok"}")
         if (launch != null) start(context, launch, "Sesli asistan açılamadı", anchor)
         else Toast.makeText(context, "Bu araçta sesli asistan bulunamadı", Toast.LENGTH_SHORT).show()
+    }
+
+    /** BYD medya merkezinin radyo ekranı (başlatıcıda simgesi yok; firmware 13.1.33). */
+    private const val RADIO_PKG = "com.byd.mediacenter"
+    private const val RADIO_ACTIVITY = "com.byd.mediacenter.radio.view.RadioActivity"
+
+    /** Araçta radyo ekranı var mı (emülatörde yok). */
+    fun hasRadio(context: Context): Boolean =
+        resolves(context, Intent(Intent.ACTION_MAIN).setClassName(RADIO_PKG, RADIO_ACTIVITY))
+
+    /** Radyo ekranını açar; yoksa false. */
+    fun radio(context: Context, anchor: LaunchAnchor? = null): Boolean {
+        val intent = Intent(Intent.ACTION_MAIN).setClassName(RADIO_PKG, RADIO_ACTIVITY)
+        if (!resolves(context, intent)) {
+            Toast.makeText(context, "Bu araçta radyo bulunamadı", Toast.LENGTH_SHORT).show()
+            return false
+        }
+        start(context, intent, "Radyo açılamadı", anchor, side = true)
+        return true
     }
 
     fun notificationAccess(context: Context) =

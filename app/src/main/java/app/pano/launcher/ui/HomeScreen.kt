@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
+import androidx.compose.ui.semantics.Role
 import app.pano.launcher.media.MediaHub
 import app.pano.launcher.ui.theme.Accent
 import app.pano.launcher.ui.theme.LocalPano
@@ -187,7 +188,8 @@ private fun NowPlayingCard(modifier: Modifier) {
     val playing by MediaHub.state.collectAsState()
     val now by rememberNow()
 
-    PanoCard(modifier, padding = 20.dp) {
+    // Sağa/sola kaydırınca önceki/sonraki parça.
+    PanoCard(modifier.trackSwipe(playing != null), padding = 20.dp) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             val artSrc = rememberLaunchSource()
             Box(
@@ -199,7 +201,7 @@ private fun NowPlayingCard(modifier: Modifier) {
                 if (art != null) {
                     Image(art.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 } else {
-                    Icon(PanoIcons.Music, contentDescription = null, tint = colors.tertiary, modifier = Modifier.size(44.dp))
+                    Icon(if (playing?.radio != null) PanoIcons.Radio else PanoIcons.Music, contentDescription = null, tint = colors.tertiary, modifier = Modifier.size(44.dp))
                 }
             }
             Column(Modifier.weight(1f).padding(start = 22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -212,32 +214,41 @@ private fun NowPlayingCard(modifier: Modifier) {
                             color = linkColor(), fontSize = 16.sp, fontWeight = FontWeight.Medium,
                             modifier = Modifier.clickable { Launch.notificationAccess(context) },
                         )
+                    } else if (Launch.hasRadio(context)) {
+                        Text(
+                            "Radyoyu aç", color = linkColor(), fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(role = Role.Button) { Launch.radio(context) }
+                                .padding(vertical = 10.dp),
+                        )
                     } else {
                         Text("Müzik uygulamasını açmak için kapağa dokun", color = colors.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     }
                 } else {
                     Column {
-                        Text(p.title, color = colors.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(p.artist, color = colors.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(p.displayTitle, color = colors.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(p.displaySubtitle, color = colors.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    // "now" her saniye değiştiği için ilerleme çubuğu canlı akar.
+                    // "now" her saniye değiştiği için ilerleme çubuğu canlı akar. Radyo canlı yayın: çubuk yok.
                     val position = now.let {
                         if (p.isPlaying && p.positionUpdatedAt > 0) {
                             p.positionMs + ((SystemClock.elapsedRealtime() - p.positionUpdatedAt) * p.speed).toLong()
                         } else p.positionMs
                     }
                     val progress = if (p.durationMs > 0) (position.toFloat() / p.durationMs).coerceIn(0f, 1f) else 0f
-                    Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(colors.raised)) {
-                        Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(colors.text))
+                    if (p.radio == null) {
+                        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(colors.raised)) {
+                            Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(colors.text))
+                        }
                     }
+                    val unit = if (p.radio != null) " istasyon" else ""
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        RoundIconButton(PanoIcons.Previous, "Önceki", { MediaHub.previous() }, colors.card, colors.text, size = 48.dp, iconSize = 26.dp)
+                        RoundIconButton(PanoIcons.Previous, "Önceki$unit", { MediaHub.previous() }, colors.card, colors.text, size = 48.dp, iconSize = 26.dp)
                         RoundIconButton(
                             if (p.isPlaying) PanoIcons.Pause else PanoIcons.Play,
                             if (p.isPlaying) "Duraklat" else "Oynat",
                             { MediaHub.playPause() }, colors.card, colors.text, size = 48.dp, iconSize = 30.dp,
                         )
-                        RoundIconButton(PanoIcons.Next, "Sonraki", { MediaHub.next() }, colors.card, colors.text, size = 48.dp, iconSize = 26.dp)
+                        RoundIconButton(PanoIcons.Next, "Sonraki$unit", { MediaHub.next() }, colors.card, colors.text, size = 48.dp, iconSize = 26.dp)
                     }
                 }
             }

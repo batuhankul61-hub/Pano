@@ -15,12 +15,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -57,14 +59,24 @@ object PanoAssistant {
     private const val THINKING_TIMEOUT_MS = 20_000L
     /** Maliyet ve gizlilik için bir oturumun üst sınırı. */
     private const val MAX_SESSION_MS = 10 * 60_000L
-    /** Bunun üstündeki mikrofon seviyesi "konuşuyor" sayılır (gösterge için). */
-    private const val VOICE_LEVEL = 0.02f
+    /** Konuşma başlamadan önceki bu kadar ses parçası (× 40 ms) da gönderilir: ilk hece kırpılmasın. */
+    private const val PRE_ROLL_CHUNKS = 8
+    /** Konuşma bittikten sonra bu sürede Google hiç tepki vermezse ses yeniden gönderilir. */
+    private const val NO_REPLY_MS = 3_000L
+    /** Yeniden gönderim için saklanan en uzun konuşma (× 40 ms = 15 sn). */
+    private const val MAX_TURN_CHUNKS = 375
 
     val SYSTEM_PROMPT = """
         Sen Pano Asistan'sın: bir BYD elektrikli otomobilin ekranındaki sesli asistan. Kullanıcı büyük ihtimalle araç kullanıyor.
         - Her zaman Türkçe konuş. Cevapların kısa olsun: çoğu zaman tek cümle. Liste okuma, gereksiz açıklama yapma.
         - Sakin, net ve dikkat dağıtmayan bir üslup kullan. Sürücüye ekrana bakmasını söyleme.
-        - Klima, navigasyon, müzik, uygulama açma, araç durumu ve hava durumu için araçlarını kullan. Bir işi yaptıysan ne yaptığını kısaca söyle.
+        - Klima, navigasyon, müzik, ses düzeyi, uygulama açma, konum, araç durumu ve hava durumu için araçlarını kullan. Bir işi yaptıysan ne yaptığını kısaca söyle.
+        - "Sesi aç / kıs / biraz artır" müzik ve medyanın ses düzeyidir: set_volume kullan. Kendi konuşma sesini değiştiremezsin.
+        - "Müzik aç" dendiğinde hiçbir şey çalmıyor olsa da media_control play çağır; müzik uygulamasını o açar.
+        - "Radyoyu aç" için open_app ile "Radyo" çağır; çalan radyoysa media_control next/previous istasyon değiştirir. Telefon gibi diğer araç uygulamaları için de open_app'i dene; "yapamam" demeden önce bir kez dene.
+        - "Yarın / hafta sonu hava" için weather sonucundaki forecast listesini kullan.
+        - "Neredeyiz?" için current_location kullan.
+        - Araçlarının kapsamadığı bilgiler (otobüs saatleri, haberler, güncel olaylar) için bilmediğini kısaca söyle.
         - Araç verisi yalnızca araçlardan gelir. Bir değer gelmediyse ya da "preview" true ise bilmediğini söyle; asla tahmin etme ya da uydurma.
         - Kapı kilidi, bagaj, ayna, cam, koltuk gibi fiziksel parçaları hareket ettiremezsin; istenirse bunu kısaca söyle.
         - Bir araç hata döndürürse sebebini tek cümleyle söyle.
@@ -96,6 +108,35 @@ object PanoAssistant {
     @Volatile private var lastVoice = 0L
     @Volatile private var startedAt = 0L
     @Volatile private var newUserTurn = true
+    /** Oturumdaki en yüksek mikrofon seviyesi: "sesimi duymuyor" sorununu logdan anlamak için. */
+    @Volatile private var peakLevel = 0f
+    /** Oturum özeti sayaçları (bkz. [stop]). */
+    @Volatile private var sentBytes = 0L
+    @Volatile private var sendFailures = 0
+    @Volatile private var voiceEvents = 0
+    @Volatile private var transcripts = 0
+    @Volatile private var localTurns = 0
+
+    /**
+     * Konuşmanın başını ve sonunu Pano bulur (Google'ın otomatik algılaması kapalı, bkz. [TurnDetector]).
+     * Yalnızca mikrofon iş parçacığından kullanılır; [preRoll] de öyle.
+     */
+    private var turns = TurnDetector()
+    private val preRoll = ArrayDeque<ByteArray>()
+    /** Son konuşmanın gönderilen sesi: Google cevap vermezse bir kez yeniden gönderilir. */
+    private val turnAudio = ArrayList<ByteArray>()
+    /** Konuşma bitti ve Google'dan tepki bekleniyor: o an (uptime ms); beklenmiyorsa 0. */
+    @Volatile private var awaitingReplySince = 0L
+    @Volatile private var replyRetried = false
+    /** Yeni bağlantı kurulunca cevapsız kalan konuşma yeniden gönderilecek. */
+    @Volatile private var resendAfterReconnect = false
+    @Volatile private var retries = 0
+
+    /** Konuşma günlüğü için turun parça parça gelen dökümleri ([ConversationLog]). */
+    private val turnLock = Any()
+    private val turnHeard = StringBuilder()
+    private val turnReply = StringBuilder()
+    @Volatile private var sessionLogged = false
     private var resumeHandle: String? = null
     private var apiKey: String? = null
     /** Her bağlantıya bir numara: eski bağlantının geç gelen olayları yok sayılır. */
@@ -109,26 +150,62 @@ object PanoAssistant {
      */
     fun start(context: Context) {
         if (isActive) return
-        val key = AssistantKey.get(context)
-        if (key.isNullOrEmpty()) {
-            _ui.value = AssistantUi(AssistantPhase.Error, error = "API anahtarı yok. Pano Ayarları → Pano Asistan.")
-            return
+        // Önce "bağlanıyor" görünür; Keystore araçta yavaş olabildiği için anahtar arka planda çözülür.
+        _ui.value = AssistantUi(AssistantPhase.Connecting)
+        val gen = ++generation
+        scope.launch {
+            val key = withContext(Dispatchers.IO) { AssistantKey.get(context) }
+            if (gen != generation) return@launch // bu arada kapatıldı
+            if (key.isNullOrEmpty()) {
+                _ui.value = AssistantUi(AssistantPhase.Error, error = "API anahtarı yok. Pano Ayarları → Pano Asistan.")
+                scope.launch { delay(6_000); if (_ui.value.phase == AssistantPhase.Error) stop() }
+                return@launch
+            }
+            runCatching { begin(context, key) }.onFailure {
+                Log.w(TAG, "oturum başlatılamadı: ${it.javaClass.simpleName}")
+                fail("Asistan başlatılamadı.")
+            }
         }
+    }
+
+    private fun begin(context: Context, key: String) {
+        ConversationLog.init(context)
+        ConversationLog.sessionStarted()
+        sessionLogged = true
         apiKey = key
         backend = PanoBackend(context)
         focus = LiveFocus(context.applicationContext).also { it.acquire() }
-        speaker = LiveSpeaker().also { it.start() }
+        val sp = LiveSpeaker()
+        if (!sp.start()) { fail("Ses çıkışı açılamadı."); return }
+        speaker = sp
         resumeHandle = null
         startedAt = SystemClock.uptimeMillis()
         lastActivity = startedAt
         newUserTurn = true
-        _ui.value = AssistantUi(AssistantPhase.Connecting)
+        peakLevel = 0f
+        sentBytes = 0L; sendFailures = 0; voiceEvents = 0; transcripts = 0; localTurns = 0; retries = 0
+        awaitingReplySince = 0L; replyRetried = false; resendAfterReconnect = false
+        synchronized(turnAudio) { turnAudio.clear() }
+        // Mikrofon bu oturumda henüz açılmadı (SetupComplete'te açılır): yeni algılayıcı güvenle kurulur.
+        turns = TurnDetector()
+        preRoll.clear()
         connect()
         ticker = scope.launch { while (isActive) { tick(); delay(200) } }
     }
 
-    /** Oturumu kapatır (✕, sessizlik ya da hata). */
-    fun stop() {
+    /** Oturumu kapatır (✕, sessizlik ya da hata). [reason] yalnızca konuşma günlüğüne yazılır. */
+    fun stop(reason: String = "kapatıldı") {
+        flushHeard(); flushReply()
+        if (sessionLogged) {
+            sessionLogged = false
+            // "Sesimi duymuyor" sorunlarında hangi halkanın koptuğunu gösterir: mikrofon → gönderim → Google.
+            val summary = "gönderilen ses ${"%.1f".format(Locale.US, sentBytes / (LiveProtocol.INPUT_RATE * 2f))} sn, " +
+                "başarısız gönderim $sendFailures, Google konuşma algılaması $voiceEvents, döküm parçası $transcripts, Pano'nun algıladığı konuşma $localTurns, yeniden gönderim $retries, " +
+                "gürültü tabanı ${"%.3f".format(Locale.US, turns.noiseFloor)}, " +
+                "mikrofon en yüksek ${"%.3f".format(Locale.US, peakLevel)}"
+            Log.i(TAG, "oturum özeti: $summary")
+            ConversationLog.sessionEnded("$reason ($summary)")
+        }
         generation++
         ready = false
         ticker?.cancel(); ticker = null
@@ -154,7 +231,7 @@ object PanoAssistant {
         ws = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (gen != generation) return
-                webSocket.send(LiveProtocol.setup(SYSTEM_PROMPT, AssistantTools.declarations(), resumeHandle))
+                webSocket.send(LiveProtocol.setup(SYSTEM_PROMPT + "\n" + nowLine(), AssistantTools.declarations(), resumeHandle))
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) = handle(gen, text)
@@ -184,6 +261,16 @@ object PanoAssistant {
         })
     }
 
+    /**
+     * Model yerel saati bilmiyor (sorulunca UTC'yi tahmin ediyordu). Her bağlantıda cihazın yerel
+     * tarih ve saati talimata eklenir; oturum en fazla 10 dakika sürdüğü için yeterince güncel kalır.
+     */
+    private fun nowLine(): String {
+        val now = java.time.ZonedDateTime.now()
+        val text = java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy EEEE, HH:mm", Locale.forLanguageTag("tr-TR")).format(now)
+        return "- Oturum başında yerel tarih ve saat: $text (${now.zone.id}). Saat sorulursa bunu ve geçen süreyi kullan."
+    }
+
     private fun closeMessage(code: Int, reason: String): String {
         val r = reason.lowercase()
         return when {
@@ -200,12 +287,13 @@ object PanoAssistant {
         val wasReady = _ui.value.phase != AssistantPhase.Connecting
         stopSessionParts()
         _ui.value = AssistantUi(AssistantPhase.Error, error = if (message == "Oturum bitti." && wasReady) null else message)
-        if (_ui.value.error == null) { stop(); return }
+        if (_ui.value.error == null) { stop("sunucu oturumu bitirdi"); return }
+        ConversationLog.error(message)
         // Hata birkaç saniye görünür, sonra kapanır.
         scope.launch {
             val shown = _ui.value
             delay(6_000)
-            if (_ui.value === shown) stop()
+            if (_ui.value === shown) stop("hata")
         }
     }
 
@@ -229,14 +317,30 @@ object PanoAssistant {
 
     private fun onEvent(e: LiveEvent) {
         val now = SystemClock.uptimeMillis()
+        // Google konuşmaya tepki verdi: cevapsızlık bekçisi ([checkNoReply]) durur.
+        if (e is LiveEvent.UserText || e is LiveEvent.ModelText || e is LiveEvent.Audio || e is LiveEvent.Tools || e == LiveEvent.TurnComplete) {
+            awaitingReplySince = 0L
+        }
         when (e) {
             LiveEvent.SetupComplete -> scope.launch {
                 ready = true
                 lastActivity = SystemClock.uptimeMillis()
                 if (mic == null) {
-                    mic = LiveMic(::onMic).also {
-                        if (!it.start()) { fail("Mikrofon açılamadı."); return@launch }
-                    }
+                    val g = generation
+                    val m = LiveMic(::onMic) { message -> scope.launch { if (g == generation) fail(message) } }
+                    if (!m.start()) { fail("Mikrofon açılamadı (araç asistanı kullanıyor olabilir)."); return@launch }
+                    mic = m
+                }
+                if (resendAfterReconnect) {
+                    // Cevapsız kalan konuşma yeni bağlantıya gönderilir ([checkNoReply]).
+                    resendAfterReconnect = false
+                    val chunks = synchronized(turnAudio) { turnAudio.toList() }
+                    ws?.send(LiveProtocol.activityStart())
+                    chunks.forEach(::sendAudio)
+                    ws?.send(LiveProtocol.activityEnd())
+                    awaitingReplySince = SystemClock.uptimeMillis()
+                    Log.i(TAG, "yeniden bağlandı; konuşma tekrar gönderildi")
+                    return@launch
                 }
                 _ui.update { it.copy(phase = AssistantPhase.Listening) }
                 Log.i(TAG, "hazır, dinliyor")
@@ -248,26 +352,37 @@ object PanoAssistant {
                 _ui.update { it.copy(phase = AssistantPhase.Speaking) }
             }
             is LiveEvent.UserText -> {
+                transcripts++
                 lastActivity = now
                 val fresh = newUserTurn
                 newUserTurn = false
                 _ui.update { it.copy(heard = if (fresh) e.text.trim() else (it.heard + e.text).trim(), reply = if (fresh) "" else it.reply) }
+                synchronized(turnLock) { turnHeard.append(e.text) }
             }
             is LiveEvent.ModelText -> {
                 lastActivity = now
                 _ui.update { it.copy(reply = (it.reply + e.text).trim()) }
+                flushHeard()
+                synchronized(turnLock) { turnReply.append(e.text) }
             }
-            LiveEvent.Interrupted -> speaker?.flush()
+            LiveEvent.Interrupted -> {
+                speaker?.flush()
+                flushReply(" (sözü kesildi)")
+            }
             LiveEvent.TurnComplete -> {
                 lastActivity = now
                 newUserTurn = true
+                flushHeard(); flushReply()
             }
             is LiveEvent.Tools -> {
+                flushHeard()
                 lastActivity = now
                 _ui.update { it.copy(phase = AssistantPhase.Thinking) }
                 e.calls.forEach(::runTool)
             }
             is LiveEvent.ToolsCancelled -> e.ids.forEach { toolJobs.remove(it)?.cancel() }
+            // Otomatik algılama kapalıyken gelmemeli; gelirse yalnızca oturum özetinde sayılır.
+            LiveEvent.SpeechStarted, LiveEvent.SpeechEnded -> voiceEvents++
             LiveEvent.GoAway -> scope.launch {
                 // Sunucu bağlantıyı yakında kesecek: sürdürme anahtarıyla yeniden bağlan.
                 Log.i(TAG, "goAway; yeniden bağlanılıyor")
@@ -279,12 +394,25 @@ object PanoAssistant {
         }
     }
 
+    /** Kullanıcının bu turdaki sözü bittiyse günlüğe yazar (döküm parça parça gelir). */
+    private fun flushHeard() {
+        val text = synchronized(turnLock) { turnHeard.toString().trim().also { turnHeard.setLength(0) } }
+        if (text.isNotEmpty()) ConversationLog.user(text)
+    }
+
+    /** Asistanın bu turdaki cevabını günlüğe yazar. */
+    private fun flushReply(suffix: String = "") {
+        val text = synchronized(turnLock) { turnReply.toString().trim().also { turnReply.setLength(0) } }
+        if (text.isNotEmpty()) ConversationLog.assistant(text + suffix)
+    }
+
     private fun runTool(call: ToolCall) {
         val b = backend ?: return
         Log.i(TAG, "araç: ${call.name}")
         val job = scope.launch {
             val result = AssistantTools.run(call, b)
             toolJobs.remove(call.id)
+            ConversationLog.tool(call.name, call.args.toString(), result.toString())
             if (!ready) return@launch
             ws?.send(LiveProtocol.toolResponse(listOf(ToolResult(call.id, call.name, wrap(result)))))
             lastActivity = SystemClock.uptimeMillis()
@@ -300,18 +428,95 @@ object PanoAssistant {
         val sp = speaker
         val now = SystemClock.uptimeMillis()
         if (sp != null && sp.isPlaying) {
+            // Asistan konuşuyor: mikrofon dinlenmez (yankı). Yarım kalmış bir tur varsa kapatılır.
+            if (turns.speaking) ws?.send(LiveProtocol.activityEnd())
+            turns.reset()
+            preRoll.clear()
             _ui.update { if (it.level != 0f) it.copy(level = 0f) else it }
             return
         }
-        if (level > VOICE_LEVEL) lastVoice = now
-        ws?.send(LiveProtocol.audio(Base64.encodeToString(pcm, Base64.NO_WRAP)))
+        if (level > peakLevel) peakLevel = level
+        when (turns.feed(level, now)) {
+            TurnDetector.Action.Start -> {
+                localTurns++
+                lastVoice = now
+                lastActivity = now
+                synchronized(turnAudio) { turnAudio.clear() }
+                awaitingReplySince = 0L
+                ws?.send(LiveProtocol.activityStart())
+                // Konuşmanın başlangıcı birkaç parça önce olabilir: bekleyen sesi önce gönder.
+                while (preRoll.isNotEmpty()) sendTurnAudio(preRoll.removeFirst())
+                sendTurnAudio(pcm)
+            }
+            TurnDetector.Action.End -> {
+                sendTurnAudio(pcm)
+                ws?.send(LiveProtocol.activityEnd())
+                lastActivity = now
+                replyRetried = false
+                awaitingReplySince = now
+                _ui.update { it.copy(phase = AssistantPhase.Thinking) }
+            }
+            TurnDetector.Action.None -> if (turns.speaking) {
+                lastVoice = now
+                sendTurnAudio(pcm)
+            } else {
+                preRoll.addLast(pcm)
+                while (preRoll.size > PRE_ROLL_CHUNKS) preRoll.removeFirst()
+            }
+        }
         _ui.update { it.copy(level = level) }
+    }
+
+    private fun sendAudio(pcm: ByteArray) {
+        val sent = ws?.send(LiveProtocol.audio(Base64.encodeToString(pcm, Base64.NO_WRAP))) == true
+        if (sent) sentBytes += pcm.size else sendFailures++
+    }
+
+    /** Konuşmanın sesini gönderir ve olası yeniden gönderim için turun sonuna kadar saklar. */
+    private fun sendTurnAudio(pcm: ByteArray) {
+        synchronized(turnAudio) { if (turnAudio.size < MAX_TURN_CHUNKS) turnAudio += pcm }
+        sendAudio(pcm)
+    }
+
+    /**
+     * Google ara sıra bir bağlantıyı tepkisiz bırakıyor: konuşmaya döküm bile gelmiyor ve aynı
+     * bağlantıdaki sonraki konuşmalar da cevapsız kalıyor (emülatörde ~10 oturumda 1). Normalde döküm
+     * konuşma bittikten ~0,3 sn sonra gelir. [NO_REPLY_MS] içinde hiçbir şey gelmezse bağlantı bırakılıp
+     * yeni bir oturum açılır ve aynı ses oraya gönderilir ([resendAfterReconnect]). Yine cevap gelmezse
+     * kullanıcıdan tekrar söylemesi istenir.
+     */
+    private fun checkNoReply(now: Long) {
+        val since = awaitingReplySince
+        if (since == 0L || now - since < NO_REPLY_MS) return
+        if (!replyRetried) {
+            replyRetried = true
+            awaitingReplySince = 0L
+            retries++
+            Log.w(TAG, "Google konuşmaya cevap vermedi; yeniden bağlanıp ses tekrar gönderilecek")
+            resendAfterReconnect = true
+            // Sürdürme anahtarı kullanılmaz: tepkisiz olan Google'daki oturumun kendisi; sürdürünce aynı
+            // tepkisiz oturuma dönülüyordu (ya da "zaten bağlı" 1008 hatası). Takılma hep oturumun ilk
+            // konuşmasında görüldü, yani korunacak bir bağlam da yok.
+            resumeHandle = null
+            // Önce numara artar: eski bağlantının kapanırken üreteceği hata olayı yok sayılsın.
+            generation++
+            ws?.cancel()
+            connect()
+            return
+        }
+        awaitingReplySince = 0L
+        Log.w(TAG, "Google yeniden bağlantıda da cevap vermedi")
+        ConversationLog.error("Google bu konuşmaya cevap vermedi (yeniden bağlanma dahil)")
+        lastActivity = now
+        newUserTurn = true
+        _ui.update { it.copy(phase = AssistantPhase.Listening, heard = "", reply = "Anlayamadım, tekrar söyler misin?") }
     }
 
     private fun tick() {
         val now = SystemClock.uptimeMillis()
         val ui = _ui.value
-        if (now - startedAt > MAX_SESSION_MS) { stop(); return }
+        if (now - startedAt > MAX_SESSION_MS) { stop("10 dakika sınırı"); return }
+        checkNoReply(now)
         when (ui.phase) {
             AssistantPhase.Speaking -> if (speaker?.isPlaying != true) {
                 lastActivity = now
@@ -322,8 +527,8 @@ object PanoAssistant {
                 if (!newUserTurn && now - lastVoice > 700 && ui.heard.isNotEmpty()) {
                     _ui.update { it.copy(phase = AssistantPhase.Thinking) }
                 } else if (now - lastActivity > IDLE_TIMEOUT_MS && now - lastVoice > IDLE_TIMEOUT_MS / 2) {
-                    Log.i(TAG, "sessizlik; kapanıyor")
-                    stop()
+                    Log.i(TAG, "sessizlik; kapanıyor (mikrofon en yüksek seviye ${"%.4f".format(peakLevel)}, konuşma eşiği ${"%.4f".format(turns.startThreshold())})")
+                    stop("sessizlik")
                 }
             }
             AssistantPhase.Thinking -> if (now - lastActivity > THINKING_TIMEOUT_MS) {

@@ -114,6 +114,13 @@ class MainActivity : ComponentActivity() {
         WeatherHub.start(this)
         // Araç verisi: BYD veri yolu, yoksa GPS hızı, o da yoksa önizleme.
         app.pano.launcher.vehicle.VehicleHub.start(this)
+        // Direksiyondaki sesli asistan tuşu; Pano öndeyken asistan bu ekranda açılır.
+        app.pano.launcher.assistant.VoiceKey.onResume(this)
+    }
+
+    override fun onPause() {
+        app.pano.launcher.assistant.VoiceKey.onPause(this)
+        super.onPause()
     }
 }
 

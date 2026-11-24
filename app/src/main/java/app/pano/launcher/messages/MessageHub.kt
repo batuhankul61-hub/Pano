@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import android.provider.Telephony
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +40,7 @@ data class IncomingMessage(
  * ```
  */
 object MessageHub {
+    private const val TAG = "MessageHub"
     private val WHATSAPP = setOf("com.whatsapp", "com.whatsapp.w4b")
 
     /** Hata ayıklama sürümünde `adb shell cmd notification post` ile test için. */
@@ -52,15 +54,35 @@ object MessageHub {
             packageName == defaultSms(context) ||
             (packageName == SHELL && isDebuggable(context))
 
+    /**
+     * Bilinen mesaj uygulaması ya da kendini mesaj olarak tanıtan bildirim
+     * (`CATEGORY_MESSAGE` veya MessagingStyle): Telegram gibi başka bir mesaj uygulaması
+     * araca kurulursa onun bildirimleri de banner olur.
+     */
+    private fun isMessage(context: Context, sbn: StatusBarNotification): Boolean {
+        if (sbn.packageName == context.packageName) return false
+        if (isMessagePackage(context, sbn.packageName)) return true
+        val n = sbn.notification
+        return n.category == Notification.CATEGORY_MESSAGE ||
+            n.extras?.getString(Notification.EXTRA_TEMPLATE) == Notification.MessagingStyle::class.java.name
+    }
+
     /** Bildirim geldi/güncellendi. Mesaj bildirimi değilse yok sayılır. */
     fun onPosted(context: Context, sbn: StatusBarNotification) {
-        if (!isMessagePackage(context, sbn.packageName)) return
+        val message = isMessage(context, sbn)
+        // Araçta neyin geldiğini görmek için (içerik loglanmaz): adb logcat -s MessageHub
+        if (!sbn.isOngoing) Log.d(TAG, "bildirim: ${sbn.packageName} kategori=${sbn.notification.category} mesaj=$message")
+        if (!message) return
         val n = sbn.notification
         // Grup özetleri ("3 sohbetten 5 mesaj") ve sürekli bildirimler (yedekleme, web oturumu) atlanır.
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         if (sbn.isOngoing) return
 
-        val parsed = parse(context, sbn) ?: return
+        val parsed = parse(context, sbn)
+        if (parsed == null) {
+            Log.d(TAG, "mesaj bildirimi okunamadı (gönderen ya da metin yok): ${sbn.packageName}")
+            return
+        }
         // Aynı mesaj tekrar yayınlandıysa banner'ı yeniden açma.
         val current = _state.value
         if (current != null && current.key == parsed.key && current.text == parsed.text && current.sender == parsed.sender) return

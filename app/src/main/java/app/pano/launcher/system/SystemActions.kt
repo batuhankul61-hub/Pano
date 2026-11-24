@@ -82,6 +82,8 @@ object SystemActions {
 class PanoAccessibility : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
+        // Bu hizmet de sürekli bağlı kalır: sesli asistan tuşu buradan da dinlenmeye başlar.
+        app.pano.launcher.assistant.VoiceKey.init(this)
         Log.i("SystemActions", "erişilebilirlik hizmeti bağlandı")
     }
 

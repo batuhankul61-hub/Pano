@@ -21,6 +21,8 @@ class AssistantToolsTest {
         override suspend fun openApp(name: String) = ok("app:$name")
         override suspend fun vehicleStatus() = ok("vehicle")
         override suspend fun weather() = ok("weather")
+        override suspend fun volume(action: VolumeAction, percent: Int?, steps: Int) = ok("volume:$action:$percent:$steps")
+        override suspend fun location() = ok("location")
         private fun ok(s: String): JSONObject { calls += s; return JSONObject().put("ok", s) }
     }
 
@@ -59,6 +61,18 @@ class AssistantToolsTest {
         assertEquals(listOf("weather"), call("weather").first.calls)
     }
 
+    @Test fun volumeArgsParsed() {
+        assertEquals(listOf("volume:Up:null:2"), call("set_volume", """{"action":"up"}""").first.calls)
+        assertEquals(listOf("volume:Down:null:5"), call("set_volume", """{"action":"DOWN","steps":5.0}""").first.calls)
+        assertEquals(listOf("volume:Up:null:10"), call("set_volume", """{"action":"up","steps":40}""").first.calls)
+        assertEquals(listOf("volume:Set:100:2"), call("set_volume", """{"action":"set","percent":140}""").first.calls)
+        assertEquals(listOf("volume:Mute:null:2"), call("set_volume", """{"action":"mute"}""").first.calls)
+        // set için yüzde şart; bilinmeyen işlem hata
+        call("set_volume", """{"action":"set"}""").let { (b, r) -> assertTrue(b.calls.isEmpty()); assertTrue(r.has("error")) }
+        call("set_volume", """{"action":"louder"}""").let { (b, r) -> assertTrue(b.calls.isEmpty()); assertTrue(r.has("error")) }
+        assertEquals(listOf("location"), call("current_location").first.calls)
+    }
+
     @Test fun unknownAndPhysicalToolsRejected() {
         listOf("lock_doors", "open_trunk", "fold_mirrors", "open_window").forEach {
             val (b, r) = call(it)
@@ -66,7 +80,7 @@ class AssistantToolsTest {
             assertTrue(r.has("error"))
         }
         val names = (0 until AssistantTools.declarations().length()).map { AssistantTools.declarations().getJSONObject(it).getString("name") }
-        assertEquals(listOf("set_climate", "navigate_to", "stop_navigation", "media_control", "open_app", "vehicle_status", "weather"), names)
+        assertEquals(listOf("set_climate", "navigate_to", "stop_navigation", "media_control", "open_app", "vehicle_status", "weather", "set_volume", "current_location"), names)
     }
 
     @Test fun appMatcher() {
@@ -82,7 +96,7 @@ class AssistantToolsTest {
         val setup = JSONObject(LiveProtocol.setup("talimat", AssistantTools.declarations(), null)).getJSONObject("setup")
         assertEquals("models/gemini-3.8-live", setup.getString("model"))
         assertEquals("AUDIO", setup.getJSONObject("generationConfig").getJSONArray("responseModalities").getString(0))
-        assertEquals(7, setup.getJSONArray("tools").getJSONObject(0).getJSONArray("functionDeclarations").length())
+        assertEquals(9, setup.getJSONArray("tools").getJSONObject(0).getJSONArray("functionDeclarations").length())
 
         val events = LiveProtocol.parse(
             """{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AAA="}}]},"outputTranscription":{"text":"Tamam"},"turnComplete":true}}""",
@@ -96,5 +110,12 @@ class AssistantToolsTest {
         assertEquals("a1", resp.getJSONObject("toolResponse").getJSONArray("functionResponses").getJSONObject(0).getString("id"))
         assertEquals(listOf(LiveEvent.SetupComplete), LiveProtocol.parse("""{"setupComplete":{}}"""))
         assertEquals(listOf(LiveEvent.ResumeHandle("h")), LiveProtocol.parse("""{"sessionResumptionUpdate":{"newHandle":"h","resumable":true}}"""))
+        assertEquals(listOf(LiveEvent.SpeechStarted), LiveProtocol.parse("""{"voiceActivity":{"type":"ACTIVITY_START","audioOffset":"2.560s"}}"""))
+        assertEquals(listOf(LiveEvent.SpeechEnded), LiveProtocol.parse("""{"voiceActivity":{"type":"ACTIVITY_END"}}"""))
+        // Google'ın otomatik konuşma algılaması kapalı; turun başını ve sonunu Pano bildirir.
+        val vad = setup.getJSONObject("realtimeInputConfig").getJSONObject("automaticActivityDetection")
+        assertTrue(vad.getBoolean("disabled"))
+        assertTrue(JSONObject(LiveProtocol.activityStart()).getJSONObject("realtimeInput").has("activityStart"))
+        assertTrue(JSONObject(LiveProtocol.activityEnd()).getJSONObject("realtimeInput").has("activityEnd"))
     }
 }

@@ -1800,7 +1800,8 @@ private fun NowPlayingWidget(modifier: Modifier) {
 
     // Kartın boş yerine dokununca sağ ekranda büyük "Şimdi çalıyor" açılır; kapak ve düğmeler kendi işini yapar.
     Column(
-        modifier.glass(c)
+        // Sağa/sola kaydırınca önceki/sonraki parça.
+        modifier.trackSwipe(p != null).glass(c)
             .clickable(role = Role.Button, onClickLabel = "Şimdi çalıyor ekranını aç") { AppSheet.openMusic() }
             .padding(24.dp),
     ) {
@@ -1816,24 +1817,35 @@ private fun NowPlayingWidget(modifier: Modifier) {
                 if (art != null) {
                     Image(art.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 } else {
-                    Icon(PanoIcons.Music, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
+                    Icon(if (p?.radio != null) PanoIcons.Radio else PanoIcons.Music, contentDescription = null, tint = Color.White, modifier = Modifier.size(40.dp))
                 }
             }
             Column(Modifier.weight(1f).padding(start = 18.dp)) {
                 Text(
-                    if (p?.isPlaying == true) "ŞİMDİ ÇALIYOR" else "MÜZİK",
+                    when {
+                        p?.radio != null -> "RADYO"
+                        p?.isPlaying == true -> "ŞİMDİ ÇALIYOR"
+                        else -> "MÜZİK"
+                    },
                     color = c.secondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp,
                 )
                 Text(
-                    p?.title ?: "Müzik çalmıyor", color = c.text, fontSize = 21.sp, fontWeight = FontWeight.SemiBold,
+                    p?.displayTitle ?: "Müzik çalmıyor", color = c.text, fontSize = 21.sp, fontWeight = FontWeight.SemiBold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
                 )
                 if (p != null) {
-                    Text(p.artist, color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(p.displaySubtitle, color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 } else if (!driving && !MediaHub.hasAccess(context)) {
                     Text(
                         "Bildirim erişimi ver", color = linkColor(), fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.clickable { Launch.notificationAccess(context) },
+                    )
+                } else if (Launch.hasRadio(context)) {
+                    // Hiçbir şey çalmıyor: radyoyu tek dokunuşla aç (büyük dokunma alanı).
+                    Text(
+                        "Radyoyu aç", color = linkColor(), fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(10.dp))
+                            .clickable(role = Role.Button) { Launch.radio(context) }.padding(vertical = 10.dp),
                     )
                 } else {
                     Text("Kapağa dokunup uygulamayı aç", color = c.secondary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
@@ -1850,21 +1862,25 @@ private fun NowPlayingWidget(modifier: Modifier) {
                 } else p.positionMs
             }
             val progress = if (p.durationMs > 0) (position.toFloat() / p.durationMs).coerceIn(0f, 1f) else 0f
-            Box(Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)).background(c.chip)) {
-                Box(Modifier.fillMaxHeight().fillMaxWidth(progress).clip(RoundedCornerShape(3.dp)).background(c.text))
+            // Radyo canlı yayın: ilerleme çubuğu yok.
+            if (p.radio == null) {
+                Box(Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)).background(c.chip)) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(progress).clip(RoundedCornerShape(3.dp)).background(c.text))
+                }
             }
             Row(
                 Modifier.fillMaxWidth().padding(top = 14.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                RoundIconButton(PanoIcons.Previous, "Önceki", { MediaHub.previous() }, Color.Transparent, c.text, size = 56.dp, iconSize = 28.dp)
+                val unit = if (p.radio != null) " istasyon" else ""
+                RoundIconButton(PanoIcons.Previous, "Önceki$unit", { MediaHub.previous() }, Color.Transparent, c.text, size = 56.dp, iconSize = 28.dp)
                 RoundIconButton(
                     if (p.isPlaying) PanoIcons.Pause else PanoIcons.Play,
                     if (p.isPlaying) "Duraklat" else "Oynat",
                     { MediaHub.playPause() }, c.chip, c.text, size = 64.dp, iconSize = 30.dp,
                 )
-                RoundIconButton(PanoIcons.Next, "Sonraki", { MediaHub.next() }, Color.Transparent, c.text, size = 56.dp, iconSize = 28.dp)
+                RoundIconButton(PanoIcons.Next, "Sonraki$unit", { MediaHub.next() }, Color.Transparent, c.text, size = 56.dp, iconSize = 28.dp)
             }
         }
     }
@@ -1898,8 +1914,9 @@ internal fun NowPlayingScreen(modifier: Modifier) {
         val art = minOf(maxHeight, maxWidth * 0.46f)
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             val artSrc = rememberLaunchSource()
+            // Kapak sağa/sola kaydırılınca önceki/sonraki parça (ilerleme çubuğu kendi sürüklemesini korur).
             Box(
-                Modifier.pressScale(0.97f).size(art).launchSource(artSrc).shadow(24.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
+                Modifier.trackSwipe(p != null).pressScale(0.97f).size(art).launchSource(artSrc).shadow(24.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp))
                     .background(Brush.linearGradient(listOf(Color(0xFFFF6482), Color(0xFFBF5AF2))))
                     .clickable(role = Role.Button, onClickLabel = "Müzik uygulamasını aç") { Launch.music(context, p?.packageName, artSrc.anchor()) },
                 contentAlignment = Alignment.Center,
@@ -1908,26 +1925,32 @@ internal fun NowPlayingScreen(modifier: Modifier) {
                 if (bmp != null) {
                     Image(bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 } else {
-                    Icon(PanoIcons.Music, contentDescription = null, tint = Color.White, modifier = Modifier.size(art * 0.3f))
+                    Icon(if (p?.radio != null) PanoIcons.Radio else PanoIcons.Music, contentDescription = null, tint = Color.White, modifier = Modifier.size(art * 0.3f))
                 }
             }
 
             Column(Modifier.weight(1f).padding(start = 40.dp)) {
                 Text(
-                    (appName ?: if (p?.isPlaying == true) "ŞİMDİ ÇALIYOR" else "MÜZİK").uppercase(tr),
+                    (if (p?.radio != null) "RADYO" else appName ?: if (p?.isPlaying == true) "ŞİMDİ ÇALIYOR" else "MÜZİK").uppercase(tr),
                     color = c.secondary, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp, maxLines = 1,
                 )
                 Text(
-                    p?.title ?: "Müzik çalmıyor", color = c.text, fontSize = 38.sp, fontWeight = FontWeight.Bold, lineHeight = 44.sp,
+                    p?.displayTitle ?: "Müzik çalmıyor", color = c.text, fontSize = 38.sp, fontWeight = FontWeight.Bold, lineHeight = 44.sp,
                     letterSpacing = (-0.6).sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp),
                 )
                 Text(
-                    p?.artist?.ifBlank { null } ?: if (p == null) "Kapağa dokunup müzik uygulamasını aç" else "",
+                    p?.displaySubtitle?.ifBlank { null } ?: if (p == null) "Kapağa dokunup müzik uygulamasını aç" else "",
                     color = c.secondary, fontSize = 22.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 6.dp),
                 )
 
-                if (p != null) {
+                if (p?.radio != null) {
+                    // Radyo canlı yayın: ilerleme ve süre yok.
+                    Text(
+                        "● Canlı yayın", color = Color(0xFFFF453A), fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 36.dp),
+                    )
+                } else if (p != null) {
                     val position = now.let {
                         if (p.isPlaying && p.positionUpdatedAt > 0) {
                             p.positionMs + ((SystemClock.elapsedRealtime() - p.positionUpdatedAt) * p.speed).toLong()
@@ -1980,14 +2003,29 @@ internal fun NowPlayingScreen(modifier: Modifier) {
                 ) {
                     val enabled = p != null
                     val tint = if (enabled) c.text else c.tertiary
-                    RoundIconButton(PanoIcons.Previous, "Önceki", { MediaHub.previous() }, Color.Transparent, tint, size = 88.dp, iconSize = 40.dp)
+                    val unit = if (p?.radio != null) " istasyon" else ""
+                    RoundIconButton(PanoIcons.Previous, "Önceki$unit", { MediaHub.previous() }, Color.Transparent, tint, size = 88.dp, iconSize = 40.dp)
                     RoundIconButton(
                         if (p?.isPlaying == true) PanoIcons.Pause else PanoIcons.Play,
                         if (p?.isPlaying == true) "Duraklat" else "Oynat",
                         { if (enabled) MediaHub.playPause() else Launch.music(context, null) },
                         c.chip, c.text, size = 108.dp, iconSize = 46.dp,
                     )
-                    RoundIconButton(PanoIcons.Next, "Sonraki", { MediaHub.next() }, Color.Transparent, tint, size = 88.dp, iconSize = 40.dp)
+                    RoundIconButton(PanoIcons.Next, "Sonraki$unit", { MediaHub.next() }, Color.Transparent, tint, size = 88.dp, iconSize = 40.dp)
+                }
+
+                // Radyo çalmıyorsa radyoya tek dokunuşla geç (aracın radyo ekranı sağ panelde açılır).
+                if (p?.radio == null && Launch.hasRadio(context)) {
+                    Row(
+                        Modifier.padding(top = 24.dp).align(Alignment.CenterHorizontally).height(60.dp)
+                            .clip(RoundedCornerShape(30.dp)).background(c.chip)
+                            .clickable(role = Role.Button, onClickLabel = "Radyoyu aç") { Launch.radio(context) }
+                            .padding(horizontal = 26.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(PanoIcons.Radio, contentDescription = null, tint = c.text, modifier = Modifier.size(26.dp))
+                        Text("Radyo", color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 10.dp))
+                    }
                 }
             }
         }

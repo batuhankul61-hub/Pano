@@ -366,7 +366,8 @@ private fun NowPlayingStrip(compact: Boolean) {
     AnimatedVisibility(p != null, enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs))) {
         if (p == null) return@AnimatedVisibility
         Row(
-            Modifier.fillMaxWidth().height(96.dp).clip(RoundedCornerShape(24.dp)).background(c.raised)
+            // Sağa/sola kaydırınca önceki/sonraki parça.
+            Modifier.fillMaxWidth().height(96.dp).trackSwipe().clip(RoundedCornerShape(24.dp)).background(c.raised)
                 .clickable(role = Role.Button, onClickLabel = "Şimdi çalıyor") { AppSheet.openMusic() }
                 .padding(start = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -376,23 +377,24 @@ private fun NowPlayingStrip(compact: Boolean) {
                 if (art != null) {
                     Image(art.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 } else {
-                    Icon(PanoIcons.Music, contentDescription = null, tint = c.secondary, modifier = Modifier.size(30.dp))
+                    Icon(if (p.radio != null) PanoIcons.Radio else PanoIcons.Music, contentDescription = null, tint = c.secondary, modifier = Modifier.size(30.dp))
                 }
             }
             Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                Text(p.title, color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (p.artist.isNotBlank()) {
-                    Text(p.artist, color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(p.displayTitle, color = c.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (p.displaySubtitle.isNotBlank()) {
+                    Text(p.displaySubtitle, color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            val unit = if (p.radio != null) " istasyon" else ""
             if (!compact) {
-                RoundIconButton(PanoIcons.Previous, "Önceki", { MediaHub.previous() }, Color.Transparent, c.text, size = button, iconSize = 26.dp)
+                RoundIconButton(PanoIcons.Previous, "Önceki$unit", { MediaHub.previous() }, Color.Transparent, c.text, size = button, iconSize = 26.dp)
             }
             RoundIconButton(
                 if (p.isPlaying) PanoIcons.Pause else PanoIcons.Play, if (p.isPlaying) "Duraklat" else "Çal",
                 { MediaHub.playPause() }, Color.Transparent, c.text, size = button, iconSize = 30.dp,
             )
-            RoundIconButton(PanoIcons.Next, "Sonraki", { MediaHub.next() }, Color.Transparent, c.text, size = button, iconSize = 26.dp)
+            RoundIconButton(PanoIcons.Next, "Sonraki$unit", { MediaHub.next() }, Color.Transparent, c.text, size = button, iconSize = 26.dp)
         }
     }
 }
@@ -704,7 +706,8 @@ private fun BottomBar(climate: ClimateState, screen: Screen, panel: UfukPanel?, 
             BarApp(PanoIcons.Music, "Müzik", active = panel == UfukPanel.Music) {
                 when {
                     AppSheet.music -> AppSheet.close()
-                    playing != null -> AppSheet.openMusic()
+                    // Hiçbir şey çalmasa da araçta radyo varsa panel açılır: oradan radyo ya da müzik seçilir.
+                    playing != null || Launch.hasRadio(context) -> AppSheet.openMusic()
                     else -> Launch.music(context, null)
                 }
             }

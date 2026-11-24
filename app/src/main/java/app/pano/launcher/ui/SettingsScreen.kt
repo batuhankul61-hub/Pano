@@ -112,7 +112,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                             SettingsSection.Notifications -> NotificationSection()
                             SettingsSection.Appearance -> AppearanceSection { section = SettingsSection.Developer }
                             SettingsSection.Driving -> DrivingSection()
-                            SettingsSection.Assistant -> Group("Gemini Live") { AssistantKeySettings() }
+                            SettingsSection.Assistant -> {
+                                Group("Gemini Live") {
+                                    AssistantKeySettings()
+                                    Divider()
+                                    VoiceKeySetting()
+                                }
+                                Group("Konuşma günlüğü") { AssistantLogSettings() }
+                            }
                             SettingsSection.Update -> Group("Pano güncellemesi") { UpdateSettings() }
                             SettingsSection.Developer -> DeveloperSection()
                         }
@@ -183,10 +190,14 @@ private fun GeneralSection() {
 private fun NotificationSection() {
     val style = LocalStyle.current
     val context = LocalContext.current
+    val access = MediaHub.hasAccess(context)
     Group("İzin") {
-        LinkRow(
+        // Erişim açıkken ayar ekranına gitmeye gerek yok; BYD o ekranı açmıyor ("IVI sistemi bu işlemi desteklemiyor").
+        if (access) InfoRow("Bildirim erişimi", "Açık · çalan şarkı gösteriliyor")
+        else LinkRow(
             "Bildirim erişimi",
-            if (MediaHub.hasAccess(context)) "Açık · çalan şarkı gösteriliyor" else "Kapalı · çalan şarkı görünmez",
+            "Kapalı · çalan şarkı ve mesajlar görünmez. Ayar ekranı açılmazsa bir kez: " +
+                "adb shell cmd notification allow_listener app.pano.launcher/app.pano.launcher.media.MediaListenerService",
         ) { Launch.notificationAccess(context) }
     }
     Group("Mesajlar") {
@@ -195,6 +206,9 @@ private fun NotificationSection() {
             "WhatsApp ve SMS mesajları ekranın üstünde kısa süre görünür",
             style.showMessages,
         ) { on -> Settings.update { it.copy(showMessages = on) } }
+        Divider()
+        val apps = remember { app.pano.launcher.messages.MessageSources.installedApps(context) }
+        InfoRow("Mesaj kaynağı", app.pano.launcher.messages.MessageSources.statusText(access, apps))
     }
 }
 
@@ -352,7 +366,7 @@ private fun AssistantKeySettings() {
         Text("Gemini API anahtarı", color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium)
         Text(
             if (hasKey) "Kayıtlı ($hint). Dock'taki Pano Asistan düğmesiyle konuş."
-            else "Anahtar yok. aistudio.google.com → Get API key ile al ve buraya yapıştır.",
+            else "Anahtar yok. aistudio.google.com → Get API key ile al, kopyala ve Yapıştır'a bas.",
             color = colors.secondary, fontSize = 15.sp, modifier = Modifier.padding(top = 3.dp),
         )
         Row(
@@ -377,7 +391,21 @@ private fun AssistantKeySettings() {
                     }
                 },
             )
-            SmallButton("Kaydet", enabled = draft.isNotEmpty(), color = colors.text) {
+            // Bazı araç klavyelerinde (BYD) alanın kendi "Yapıştır" menüsü çıkmıyor: panodan doğrudan al.
+            if (draft.isEmpty()) SmallButton("Yapıştır", enabled = true, color = colors.text) {
+                val key = clipboardText(context)?.filterNot { it.isWhitespace() }.orEmpty()
+                when {
+                    key.isEmpty() ->
+                        android.widget.Toast.makeText(context, "Panoda metin yok. Anahtarı önce bu cihazda kopyala.", android.widget.Toast.LENGTH_LONG).show()
+                    else -> {
+                        AssistantKey.set(context, key)
+                        focus.clearFocus()
+                        val warn = if (!key.startsWith("AIza")) " Bu bir Gemini anahtarına benzemiyor, kontrol et." else ""
+                        android.widget.Toast.makeText(context, "Anahtar kaydedildi (••••${key.takeLast(4)}).$warn", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            else SmallButton("Kaydet", enabled = true, color = colors.text) {
                 AssistantKey.set(context, draft)
                 focus.clearFocus()
                 draft = ""
@@ -385,12 +413,105 @@ private fun AssistantKeySettings() {
             if (hasKey) SmallButton("Sil", enabled = true, color = Accent.Red) { AssistantKey.clear(context) }
         }
         Text(
-            "Ses yalnızca düğmeye basınca açılır ve Google'a (Gemini Live) gider; konuşma kaydı tutulmaz. " +
+            "Ses yalnızca düğmeye basınca açılır ve Google'a (Gemini Live) gider. Konuşma günlüğü açık değilse kayıt tutulmaz. " +
                 "Kullanım Google hesabına ücretlendirilir. Anahtar bu cihazda şifreli saklanır.",
             color = colors.secondary, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 12.dp),
         )
     }
 }
+
+/**
+ * Direksiyondaki sesli asistan tuşu Pano Asistan'ı açsın mı. Kapalıyken (ya da API anahtarı yokken)
+ * tuş aracın kendi asistanını açar. Ayrıntı: [app.pano.launcher.assistant.VoiceKey].
+ */
+@Composable
+private fun VoiceKeySetting() {
+    val context = LocalContext.current
+    app.pano.launcher.assistant.VoiceKey.init(context)
+    val on by app.pano.launcher.assistant.VoiceKey.enabled
+    val hasKey by AssistantKey.hasKey
+    SwitchRowSetting(
+        "Direksiyondaki sesli asistan tuşu",
+        when {
+            !on -> "Kapalı: tuş aracın kendi asistanını açar."
+            !hasKey -> "Açık, ama API anahtarı girilene kadar tuş aracın kendi asistanını açar."
+            else -> "Tuş Pano Asistan'ı açar ve kapatır. Aracın kendi asistanı ekrandaki mikrofon düğmesinden açılır."
+        },
+        on,
+    ) { app.pano.launcher.assistant.VoiceKey.setEnabled(context, it) }
+}
+
+/**
+ * Konuşma günlüğü: açılıp kapatılır, son konuşmalar burada okunur. Asistanın neden "bilmiyorum /
+ * erişimim yok" dediğini görmek için araç çağrılarının sonuçları da yazılır. Yalnızca bu cihazda.
+ */
+@Composable
+private fun AssistantLogSettings() {
+    val colors = LocalPano.current
+    val context = LocalContext.current
+    app.pano.launcher.assistant.ConversationLog.init(context)
+    val enabled by app.pano.launcher.assistant.ConversationLog.enabled
+    var open by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf<String?>(null) }
+    var reload by remember { mutableStateOf(0) }
+
+    SwitchRowSetting(
+        "Konuşmaları kaydet",
+        "Söylediklerin, cevaplar ve asistanın kullandığı araçların sonuçları yalnızca bu cihazda saklanır.",
+        enabled,
+    ) { app.pano.launcher.assistant.ConversationLog.setEnabled(context, it) }
+    Divider()
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            "Son konuşmalar", color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+        )
+        SmallButton(if (open) "Gizle" else "Göster", enabled = true, color = colors.text) { open = !open; reload++ }
+        SmallButton("Temizle", enabled = true, color = Accent.Red) {
+            app.pano.launcher.assistant.ConversationLog.clear { reload++ }
+            text = ""
+        }
+    }
+    if (open) {
+        // Dosya okuma arka planda; açıkken birkaç saniyede bir tazelenir (yeni oturum düşsün diye).
+        androidx.compose.runtime.LaunchedEffect(reload) {
+            while (true) {
+                text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    app.pano.launcher.assistant.ConversationLog.tail()
+                }
+                kotlinx.coroutines.delay(3_000)
+            }
+        }
+        val scroll = rememberScrollState()
+        // Yeni satırlar altta: açılınca ve metin değişince en alta in.
+        androidx.compose.runtime.LaunchedEffect(text) { scroll.scrollTo(scroll.maxValue) }
+        Box(
+            Modifier.padding(start = 24.dp, end = 24.dp, bottom = 20.dp).fillMaxWidth().height(380.dp)
+                .clip(RoundedCornerShape(16.dp)).background(colors.raised)
+                .verticalScroll(scroll).padding(16.dp),
+        ) {
+            Text(
+                text?.takeIf { it.isNotBlank() } ?: if (text == null) "Yükleniyor…"
+                else if (enabled) "Henüz kayıt yok. Asistanla konuşunca burada görünür."
+                else "Kayıt yok. Yukarıdan \"Konuşmaları kaydet\"i aç.",
+                color = colors.text, fontSize = 14.sp, lineHeight = 20.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            )
+        }
+    }
+}
+
+/** Panodaki düz metin; yoksa ya da okunamazsa null. Değer loglanmaz (API anahtarı olabilir). */
+private fun clipboardText(context: android.content.Context): String? = runCatching {
+    val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+    val clip = cm?.primaryClip ?: return null
+    if (clip.itemCount == 0) return null
+    clip.getItemAt(0).coerceToText(context)?.toString()
+}.getOrNull()
 
 @Composable
 private fun SmallButton(label: String, enabled: Boolean, color: Color, onClick: () -> Unit) {
@@ -421,6 +542,16 @@ private fun LinkRow(title: String, subtitle: String, onClick: () -> Unit) {
             Text(subtitle, color = colors.secondary, fontSize = 15.sp, fontWeight = FontWeight.Normal, modifier = Modifier.padding(top = 3.dp))
         }
         Icon(PanoIcons.ChevronRight, contentDescription = null, tint = colors.tertiary, modifier = Modifier.size(20.dp))
+    }
+}
+
+/** Dokunulmayan bilgi satırı (durum açıklaması). */
+@Composable
+private fun InfoRow(title: String, subtitle: String) {
+    val colors = LocalPano.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp)) {
+        Text(title, color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+        Text(subtitle, color = colors.secondary, fontSize = 15.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 3.dp))
     }
 }
 

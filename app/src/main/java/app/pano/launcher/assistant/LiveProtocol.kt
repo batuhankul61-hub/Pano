@@ -42,12 +42,25 @@ object LiveProtocol {
             .put("outputAudioTranscription", JSONObject())
             .put("sessionResumption", if (resumeHandle != null) JSONObject().put("handle", resumeHandle) else JSONObject())
             .put("contextWindowCompression", JSONObject().put("slidingWindow", JSONObject()))
+            // Google'ın otomatik konuşma algılaması kapalı: arka plan gürültüsünde (araçta yol/motor sesi,
+            // emülatörde oda sesi) konuşmanın başladığını görüp bittiğini görmüyor, cevap vermeden
+            // bekleyip kalıyordu. Turun başını ve sonunu Pano bildirir ([TurnDetector], [activityStart]).
+            .put(
+                "realtimeInputConfig",
+                JSONObject().put("automaticActivityDetection", JSONObject().put("disabled", true)),
+            )
         return JSONObject().put("setup", setup).toString()
     }
 
     fun audio(base64Pcm: String): String = JSONObject()
         .put("realtimeInput", JSONObject().put("audio", JSONObject().put("data", base64Pcm).put("mimeType", "audio/pcm;rate=$INPUT_RATE")))
         .toString()
+
+    /** Kullanıcının konuşması başladı (otomatik algılama kapalıyken). Ardından ses parçaları gelir. */
+    fun activityStart(): String = JSONObject().put("realtimeInput", JSONObject().put("activityStart", JSONObject())).toString()
+
+    /** Kullanıcının konuşması bitti: Google cevap üretmeye başlar. */
+    fun activityEnd(): String = JSONObject().put("realtimeInput", JSONObject().put("activityEnd", JSONObject())).toString()
 
     fun audioStreamEnd(): String = JSONObject().put("realtimeInput", JSONObject().put("audioStreamEnd", true)).toString()
 
@@ -89,6 +102,11 @@ object LiveProtocol {
         o.optJSONObject("toolCallCancellation")?.optJSONArray("ids")?.let { ids ->
             out += LiveEvent.ToolsCancelled((0 until ids.length()).map { ids.optString(it) })
         }
+        // Google'ın konuşma algılayıcısı: kullanıcının konuşması başladı / bitti.
+        when (o.optJSONObject("voiceActivity")?.optString("type")) {
+            "ACTIVITY_START" -> out += LiveEvent.SpeechStarted
+            "ACTIVITY_END" -> out += LiveEvent.SpeechEnded
+        }
         if (o.has("goAway")) out += LiveEvent.GoAway
         o.optJSONObject("sessionResumptionUpdate")?.let { u ->
             val handle = u.optString("newHandle")
@@ -114,6 +132,8 @@ sealed interface LiveEvent {
     data object TurnComplete : LiveEvent
     data class Tools(val calls: List<ToolCall>) : LiveEvent
     data class ToolsCancelled(val ids: List<String>) : LiveEvent
+    data object SpeechStarted : LiveEvent
+    data object SpeechEnded : LiveEvent
     data object GoAway : LiveEvent
     data class ResumeHandle(val handle: String) : LiveEvent
     data class Usage(val prompt: Int, val response: Int, val total: Int) : LiveEvent

@@ -42,6 +42,20 @@ data class Weather(
     val lowC: Double,
     /** Verinin alındığı an (System.currentTimeMillis). */
     val fetchedAt: Long,
+    /** Bugünden başlayarak günlük tahmin (bugün, yarın…); alınamadıysa boş. */
+    val days: List<DayForecast> = emptyList(),
+)
+
+/** Bir günün tahmini (Open-Meteo `daily`). */
+data class DayForecast(
+    /** Yerel tarih, "2026-11-24" biçiminde. */
+    val date: String,
+    val code: Int,
+    val description: String,
+    val highC: Double,
+    val lowC: Double,
+    /** Günün en yüksek yağış olasılığı (%); bilinmiyorsa null. */
+    val precipitationChance: Int?,
 )
 
 /** Open-Meteo'dan (API anahtarı gerekmez) anlık hava durumunu çeker ve 15 dakikada bir yeniler. */
@@ -49,6 +63,8 @@ object WeatherHub {
     private const val TAG = "WeatherHub"
     private const val REFRESH_MS = 15 * 60 * 1000L
     private const val RETRY_MS = 60 * 1000L
+    /** Bugün dahil kaç günlük tahmin alınır (asistan "yarın", "hafta sonu" sorularına cevap verebilsin). */
+    private const val FORECAST_DAYS = 4
 
     /** Konum bilinmiyorsa ya da izin yoksa kullanılacak yer: İstanbul. */
     private const val FALLBACK_LAT = 41.0082
@@ -111,8 +127,8 @@ object WeatherHub {
             Locale.US,
             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f" +
                 "&current=temperature_2m,weather_code,is_day" +
-                "&daily=temperature_2m_max,temperature_2m_min" +
-                "&timezone=auto&forecast_days=1",
+                "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+                "&timezone=auto&forecast_days=$FORECAST_DAYS",
             lat, lon,
         )
         val conn = URL(url).openConnection() as HttpURLConnection
@@ -142,7 +158,29 @@ object WeatherHub {
             highC = daily.getJSONArray("temperature_2m_max").getDouble(0),
             lowC = daily.getJSONArray("temperature_2m_min").getDouble(0),
             fetchedAt = System.currentTimeMillis(),
+            days = runCatching { parseDays(daily) }.getOrDefault(emptyList()),
         )
+    }
+
+    /** Günlük tahmin dizileri; bir günde eksik alan varsa o gün atlanır. */
+    private fun parseDays(daily: JSONObject): List<DayForecast> {
+        val dates = daily.optJSONArray("time") ?: return emptyList()
+        val codes = daily.optJSONArray("weather_code") ?: return emptyList()
+        val max = daily.getJSONArray("temperature_2m_max")
+        val min = daily.getJSONArray("temperature_2m_min")
+        val rain = daily.optJSONArray("precipitation_probability_max")
+        return (0 until dates.length()).mapNotNull { i ->
+            if (codes.isNull(i) || max.isNull(i) || min.isNull(i)) return@mapNotNull null
+            val code = codes.getInt(i)
+            DayForecast(
+                date = dates.getString(i),
+                code = code,
+                description = describe(code),
+                highC = max.getDouble(i),
+                lowC = min.getDouble(i),
+                precipitationChance = rain?.takeIf { i < it.length() && !it.isNull(i) }?.getInt(i),
+            )
+        }
     }
 
     /** WMO hava kodunu Türkçe kısa açıklamaya çevirir. */

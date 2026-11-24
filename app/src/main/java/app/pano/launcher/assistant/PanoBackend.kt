@@ -2,7 +2,11 @@ package app.pano.launcher.assistant
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import app.pano.launcher.Launch
+import app.pano.launcher.ui.hasLocationPermission
+import java.time.LocalDate
+import java.time.format.TextStyle
 import app.pano.launcher.media.MediaHub
 import app.pano.launcher.navigation.NavPhase
 import app.pano.launcher.navigation.PanoNav
@@ -28,6 +32,13 @@ import kotlin.math.roundToInt
 class PanoBackend(private val context: Context) : AssistantBackend {
 
     private val turkish = Locale.forLanguageTag("tr-TR")
+
+    private companion object {
+        /** Müzik uygulaması açıldıktan sonra medya oturumunun belirmesi için beklenen süre. */
+        const val MUSIC_WAIT_MS = 5_000L
+        /** "Radyoyu aç" gibi isteklerde söylenen ad (normalize edilmiş). */
+        val RADIO_NAMES = setOf("radyo", "radio", "fm", "fmradyo", "am", "dab")
+    }
 
     override suspend fun climate(change: ClimateChange): JSONObject = withContext(Dispatchers.Main) {
         val c = ClimateStore.load(context)
@@ -86,9 +97,35 @@ class PanoBackend(private val context: Context) : AssistantBackend {
         JSONObject().put("stopped", had).apply { if (!had) put("note", "Zaten aktif navigasyon yoktu.") }
     }
 
-    override suspend fun media(action: MediaAction): JSONObject = withContext(Dispatchers.Main) {
+    override suspend fun media(action: MediaAction): JSONObject {
+        if (MediaHub.state.value == null && action == MediaAction.Play) return startMusic()
+        return withContext(Dispatchers.Main) { controlMedia(action) }
+    }
+
+    /**
+     * Hiç müzik açık değilken "çal": müzik uygulamasını açar, oturum belirirse çalmayı başlatır.
+     * Bazı uygulamalar açılınca kendiliğinden çalmaz; o zaman kullanıcıya seçmesi söylenir.
+     */
+    private suspend fun startMusic(): JSONObject {
+        val launched = withContext(Dispatchers.Main) { Launch.music(context, null) }
+        if (!launched) return JSONObject().put("error", "Araçta açılacak bir müzik uygulaması bulunamadı.")
+        if (!MediaHub.hasAccess(context)) {
+            return JSONObject().put("opened_app", true).put("playing", false)
+                .put("note", "Müzik uygulaması açıldı. Pano'nun bildirim erişimi kapalı olduğu için çalmayı başlatamıyor; kullanıcı uygulamadan seçmeli.")
+        }
+        val session = withTimeoutOrNull(MUSIC_WAIT_MS) { MediaHub.state.first { it != null } }
+        if (session == null) {
+            return JSONObject().put("opened_app", true).put("playing", false)
+                .put("note", "Müzik uygulaması açıldı ama henüz bir şey çalmıyor; kullanıcı uygulamadan bir şarkı ya da çalma listesi seçmeli.")
+        }
+        if (!session.isPlaying) withContext(Dispatchers.Main) { MediaHub.playPause() }
+        return JSONObject().put("opened_app", true).put("playing", true)
+            .put("title", session.title).put("artist", session.artist)
+    }
+
+    private fun controlMedia(action: MediaAction): JSONObject {
         val now = MediaHub.state.value
-            ?: return@withContext JSONObject().put(
+            ?: return JSONObject().put(
                 "error",
                 if (MediaHub.hasAccess(context)) "Şu an açık bir medya oturumu yok." else "Pano'nun bildirim erişimi kapalı; müzik kontrol edilemiyor.",
             )
@@ -99,9 +136,10 @@ class PanoBackend(private val context: Context) : AssistantBackend {
             MediaAction.Previous -> MediaHub.previous()
             MediaAction.Status -> Unit
         }
-        JSONObject()
-            .put("title", now.title)
-            .put("artist", now.artist)
+        return JSONObject()
+            .put("title", now.displayTitle)
+            .put("artist", now.displaySubtitle)
+            .apply { now.radio?.let { put("source", "radio").put("band", it.band); it.frequency?.let { f -> put("frequency", f) } } }
             .put("playing", if (action == MediaAction.Status) now.isPlaying else action != MediaAction.Pause)
             .apply { if (action == MediaAction.Next || action == MediaAction.Previous) put("note", "Parça değişti; yeni parçanın adı birazdan güncellenir.") }
     }
@@ -109,6 +147,11 @@ class PanoBackend(private val context: Context) : AssistantBackend {
     override suspend fun openApp(name: String): JSONObject {
         if (Settings.state.value.drivingLock && VehicleHub.isDriving.value) {
             return JSONObject().put("error", "Sürüş sırasında uygulama açma kilitli.")
+        }
+        // Aracın radyo ekranının başlatıcı simgesi yok; adıyla istenirse doğrudan açılır.
+        if (AppMatcher.normalize(name) in RADIO_NAMES && Launch.hasRadio(context)) {
+            withContext(Dispatchers.Main) { Launch.radio(context) }
+            return JSONObject().put("opened", "Radyo")
         }
         val pm = context.packageManager
         val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
@@ -154,12 +197,85 @@ class PanoBackend(private val context: Context) : AssistantBackend {
     override suspend fun weather(): JSONObject {
         val w = WeatherHub.state.value ?: return JSONObject().put("error", "Hava durumu henüz alınamadı.")
         val ageMin = ((System.currentTimeMillis() - w.fetchedAt) / 60_000).toInt()
+        val today = LocalDate.now()
+        val days = JSONArray()
+        w.days.forEach { d ->
+            val date = runCatching { LocalDate.parse(d.date) }.getOrNull() ?: return@forEach
+            if (date.isBefore(today)) return@forEach
+            val label = when (date) {
+                today -> "bugün"
+                today.plusDays(1) -> "yarın"
+                else -> date.dayOfWeek.getDisplayName(TextStyle.FULL, turkish)
+            }
+            days.put(
+                JSONObject()
+                    .put("day", label)
+                    .put("date", d.date)
+                    .put("description", d.description)
+                    .put("high_c", d.highC.roundToInt())
+                    .put("low_c", d.lowC.roundToInt())
+                    .apply { d.precipitationChance?.let { put("precipitation_chance_percent", it) } },
+            )
+        }
         return JSONObject()
             .put("temperature_c", w.temperatureC.roundToInt())
             .put("description", w.description)
             .put("high_c", w.highC.roundToInt())
             .put("low_c", w.lowC.roundToInt())
             .put("updated_minutes_ago", ageMin)
+            .apply { if (days.length() > 0) put("forecast", days) else put("note", "Günlük tahmin henüz alınamadı; yalnızca bugünün değerleri var.") }
+    }
+
+    override suspend fun volume(action: VolumeAction, percent: Int?, steps: Int): JSONObject = withContext(Dispatchers.Main) {
+        val am = context.getSystemService(AudioManager::class.java)
+            ?: return@withContext JSONObject().put("error", "Ses denetimine ulaşılamıyor.")
+        val stream = AudioManager.STREAM_MUSIC
+        val max = am.getStreamMaxVolume(stream).coerceAtLeast(1)
+        // Sistem ses paneli açılmaz (bayrak 0); Pano'nun kendi göstergeleri sesi zaten gösteriyor.
+        val ok = runCatching {
+            when (action) {
+                VolumeAction.Up -> repeat(steps) { am.adjustStreamVolume(stream, AudioManager.ADJUST_RAISE, 0) }
+                VolumeAction.Down -> repeat(steps) { am.adjustStreamVolume(stream, AudioManager.ADJUST_LOWER, 0) }
+                VolumeAction.Set -> {
+                    val target = ((percent ?: 0) * max / 100f).roundToInt().coerceIn(0, max)
+                    if (target > 0 && am.isStreamMute(stream)) am.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
+                    am.setStreamVolume(stream, target, 0)
+                }
+                VolumeAction.Mute -> am.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, 0)
+                VolumeAction.Unmute -> am.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
+                VolumeAction.Status -> Unit
+            }
+        }
+        // Rahatsız Etmeyin gibi durumlarda sistem değiştirmeye izin vermeyebilir.
+        ok.exceptionOrNull()?.let { return@withContext JSONObject().put("error", "Ses değiştirilemedi (${it.javaClass.simpleName}).") }
+        val level = am.getStreamVolume(stream)
+        JSONObject()
+            .put("level_percent", (level * 100f / max).roundToInt())
+            .put("muted", am.isStreamMute(stream))
+            .apply { if (action == VolumeAction.Up && level == max) put("note", "Ses zaten en yüksekte.") }
+            .apply { if (action == VolumeAction.Down && level == 0) put("note", "Ses en düşükte.") }
+    }
+
+    override suspend fun location(): JSONObject {
+        PanoNav.init(context)
+        val loc = PanoNav.lastLocation ?: PanoNav.bestLastKnown(context)
+            ?: return JSONObject().put(
+                "error",
+                if (!hasLocationPermission(context)) "Pano'nun konum izni yok." else "Konum henüz bilinmiyor (GPS sinyali yok).",
+            )
+        val ageMin = ((System.currentTimeMillis() - loc.time) / 60_000).coerceAtLeast(0)
+        val o = JSONObject().put("location_age_minutes", ageMin)
+        if (loc.hasAccuracy()) o.put("accuracy_m", loc.accuracy.roundToInt())
+        val place = RouteEngine.reverse(loc.latitude, loc.longitude)
+        if (place == null) {
+            o.put("note", "Yer adı alınamadı (ağ yok olabilir); yalnızca koordinat biliniyor.")
+                .put("lat", "%.4f".format(Locale.US, loc.latitude)).put("lon", "%.4f".format(Locale.US, loc.longitude))
+        } else {
+            o.put("near", place.name)
+            if (place.detail.isNotBlank()) o.put("area", place.detail)
+        }
+        if (ageMin > 10) o.put("warning", "Konum $ageMin dakika önceye ait; araç o zamandan beri yer değiştirmiş olabilir.")
+        return o
     }
 }
 

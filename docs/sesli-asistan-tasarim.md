@@ -75,11 +75,43 @@ gitmesi kabul edildi. Kod `assistant/` paketinde.
 - **Ses:** mikrofon 16 kHz PCM (`AudioRecord`, VOICE_RECOGNITION, varsa yankı/gürültü bastırma), cevap 24 kHz
   (`AudioTrack`, USAGE_ASSISTANT). Oturum boyunca ses odağı `GAIN_TRANSIENT_MAY_DUCK`: müzik kısılır.
   Hoparlör sesi mikrofona girip modelin sözünü kesmesin diye asistan konuşurken mikrofon gönderilmez.
-- **Araçlar:** `set_climate`, `navigate_to`, `stop_navigation`, `media_control`, `open_app`, `vehicle_status`,
-  `weather`. Fiziksel hareket eden hiçbir şey yok. `vehicle_status` önizlemede örnek değerleri modele vermez.
+- **Araçlar:** `set_climate`, `navigate_to`, `stop_navigation`, `media_control` (hiçbir şey çalmıyorken `play` müzik
+  uygulamasını açar), `open_app`, `vehicle_status`, `weather` (bugün + 4 günlük tahmin), `set_volume` (medya ses düzeyi),
+  `current_location` (Photon ters arama). Fiziksel hareket eden hiçbir şey yok. `vehicle_status` önizlemede örnek değerleri modele vermez.
+- **Direksiyondaki sesli asistan tuşu** (`VoiceKey`, Ayarlar → Pano Asistan, varsayılan açık, API anahtarı yoksa
+  devre dışı). Firmware'de (13.1.33) tuş BYD'ye özel kod **327**; `PhoneWindowManager` onu uygulamalara vermez,
+  bırakılınca `MediaKeyHandler.sendVoiceButtonIntent` ile korumalı `android.intent.action.MEDIA_VOICE` yayınını
+  gönderir. BYD asistanı (`com.byd.vrassistant`, `HardKeyReceiverEx`) da bunu dinler ama mikrofon başkasındayken
+  (`AudioMicReceiver.isMicRelease`) yok sayar. Pano, Android Auto gibi `android.broadcast.voice.request.start`
+  (`who=androidauto`, korumalı değil) göndererek tuşu üstlenir; kapatınca `...request.release` ile geri bırakır.
+  Tuş dinleyicisi bildirim dinleyici / erişilebilirlik hizmeti / ana ekran açılınca kaydolur; Pano süreci yoksa tuş
+  BYD asistanını açar. Pano ekranda değilken oturum boyunca ön plan hizmeti (`AssistantForegroundService`) çalışır
+  (yoksa Android arka planda mikrofona sessizlik verir); gösterge görünmez, yalnızca ses. Emülatörde tuş:
+  `adb shell am broadcast -a android.intent.action.MEDIA_VOICE` (araçta korumalı, adb ile gönderilemez).
+  Araçta doğrulanacaklar: logcat `VoiceKey` ve BYD'nin `NEU_HardKeyReceiverEx` / `NEU_AudioMicReceiver` satırları;
+  ikinci BYD asistanı `com.byd.vrassistant.xf` (SpeechHMI) da `MEDIA_VOICE` dinliyor, bu araçta çalışıp çalışmadığı
+  ve aynı mikrofon protokolüne uyup uymadığı bilinmiyor; BYD asistanının servisi yeniden başlarsa bayrağı sıfırlanır
+  (Pano her ana ekran açılışında ve her tuşta isteği tazeler).
+- **Konuşma algılama (Kasım 2026):** Google'ın otomatik konuşma algılaması (`automaticActivityDetection`) kapalı.
+  Açıkken arka plan gürültüsünde konuşmanın başladığını görüp bittiğini görmüyor, cevap vermeden bekliyordu
+  (emülatörde 8 oturumda 3; araçta yol gürültüsüyle daha sık beklenir). Turun başını ve sonunu Pano bildirir
+  (`activityStart` / `activityEnd`): `TurnDetector` mikrofon seviyesinden, ortam gürültüsüne uyan eşikle
+  (oturum başında 200 ms ölçüm, sonra yavaş ortalama) konuşmayı ve 0,8 sn sessizliği bulur, başlangıçtan önceki
+  0,3 sn de gönderilir. Yalnızca konuşma gönderildiği için dinleme maliyeti de düştü (oturum başına ~2 sn).
+- **Cevapsız oturum:** Google ara sıra yeni açılan bir oturumu baştan tepkisiz bırakıyor (emülatörde ~5'te 1; döküm
+  bile gelmiyor, aynı oturumdaki sonraki konuşmalar da cevapsız). Konuşma bittikten 3 sn içinde hiçbir şey gelmezse
+  yeni bir oturum açılıp (sürdürme anahtarı **olmadan**: sürdürmek aynı tepkisiz oturuma dönüyor) aynı ses tekrar
+  gönderilir; yine gelmezse ekranda "Anlayamadım, tekrar söyler misin?" yazar. 28 konuşmalık denemede 27'si
+  cevaplandı.
+- **Tanı:** her oturumun sonunda logcat'e ve konuşma günlüğüne özet yazılır (gönderilen ses, Google'ın döküm
+  sayısı, Pano'nun algıladığı konuşma, yeniden gönderim, gürültü tabanı, en yüksek mikrofon seviyesi).
+  Emülatörde bilgisayar mikrofonu için her açılışta: `adb emu avd hostmicon`.
 - **Oturum:** dock'taki ✦ "Pano Asistan" düğmesi (🎤 hâlâ BYD asistanı). 12 sn konuşma olmazsa kapanır, en fazla
   10 dk. `goAway` gelince `sessionResumption` anahtarıyla yeniden bağlanır.
 - **Anahtar:** Android Keystore AES-GCM ile şifreli SharedPreferences (`pano_assistant`). Loglanmaz.
+- **Konuşma günlüğü** (`ConversationLog`, varsayılan kapalı): Ayarlar → Pano Asistan → Konuşma günlüğü. Açıkken
+  dökümler, cevaplar ve araç çağrılarının sonuçları `files/asistan-gunlugu.txt`'ye yazılır (yalnızca cihazda,
+  1 MB'ı aşınca eski yarısı atılır), Ayarlar'dan okunur. Debug'da: `adb shell run-as app.pano.launcher cat files/asistan-gunlugu.txt`.
 
 **Maliyet hesabı** (ücretli katman, Kasım 2026; güncelini aistudio.google.com/docs/pricing'den doğrula): ses giriş
 $3 / 1M token, ses çıkış $12 / 1M token, ses 25 token/sn. Yani dinlenen her dakika ≈ $0,0045, asistanın konuştuğu her

@@ -59,6 +59,12 @@ object PanoIcons {
     val Speaker = line("speaker", "M4 9.5h3.5L12 5.5v13l-4.5-4H4z" + "M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11")
     val SpeakerOff = line("speaker.slash", "M4 9.5h3.5L12 5.5v13l-4.5-4H4zM16 9.5l5 5M21 9.5l-5 5")
     val Music = line("music", "M9 17.5V6.2l10-2v11.3" + circle(6.5f, 17.5f, 2.5f) + circle(16.5f, 15.5f, 2.5f))
+    /** Radyo: anten, gövde, hoparlör ve frekans çizgileri. */
+    val Radio = line(
+        "radio",
+        "M5.5 9.5h13a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM7 9.5l10-5" +
+            circle(8.5f, 14.5f, 2.3f) + "M14 13h3.5M14 16h3.5",
+    )
     val Phone = line(
         "phone",
         "M6.2 4h2.6l1.6 4.2-2 1.3a11 11 0 0 0 6.1 6.1l1.3-2 4.2 1.6v2.6a2 2 0 0 1-2.2 2A15.8 15.8 0 0 1 4.2 6.2 2 2 0 0 1 6.2 4z",

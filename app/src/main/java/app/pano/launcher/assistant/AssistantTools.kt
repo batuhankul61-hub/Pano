@@ -19,6 +19,9 @@ data class ClimateChange(
 
 enum class MediaAction { Play, Pause, Next, Previous, Status }
 
+/** Medya ses düzeyi işlemi. [Set] için yüzde ayrıca verilir. */
+enum class VolumeAction { Up, Down, Set, Mute, Unmute, Status }
+
 /**
  * Araçların gerçekte iş yaptığı katman. Uygulamada [PanoBackend] Pano'nun hub'larına bağlanır;
  * testte sahte bir uygulama hangi çağrının nereye gittiğini kaydeder.
@@ -31,6 +34,9 @@ interface AssistantBackend {
     suspend fun openApp(name: String): JSONObject
     suspend fun vehicleStatus(): JSONObject
     suspend fun weather(): JSONObject
+    /** [percent] yalnızca [VolumeAction.Set] için (0–100); [steps] yalnızca Up/Down için kademe sayısı. */
+    suspend fun volume(action: VolumeAction, percent: Int?, steps: Int): JSONObject
+    suspend fun location(): JSONObject
 }
 
 /**
@@ -71,7 +77,8 @@ object AssistantTools {
         .put(
             fn(
                 "media_control",
-                "Çalan müziği kontrol eder ya da ne çaldığını söyler.",
+                "Çalan müziği kontrol eder ya da ne çaldığını söyler. Hiç müzik açık değilken 'play' müzik uygulamasını açar " +
+                    "ve çalmayı dener; sonuçtaki 'playing' false ise kullanıcının uygulamadan bir şey seçmesi gerekir.",
                 props("action" to enumStr("Yapılacak iş.", listOf("play", "pause", "next", "previous", "status"))),
                 required = listOf("action"),
             ),
@@ -79,7 +86,8 @@ object AssistantTools {
         .put(
             fn(
                 "open_app",
-                "Araçta yüklü bir uygulamayı adıyla açar (ör. Spotify, YouTube Music, Waze). Ekranın sağ panelinde açılır.",
+                "Araçta yüklü bir uygulamayı adıyla açar (ör. Spotify, YouTube Music, Waze, Radyo). Ekranın sağ panelinde açılır. " +
+                    "Bulunamazsa Türkçe/İngilizce diğer adıyla bir kez daha dene (Radyo ↔ Radio, Müzik ↔ Music).",
                 props("name" to str("Uygulamanın adı.")),
                 required = listOf("name"),
             ),
@@ -92,7 +100,34 @@ object AssistantTools {
                 props(),
             ),
         )
-        .put(fn("weather", "Bulunulan yerin anlık hava durumunu okur.", props()))
+        .put(
+            fn(
+                "weather",
+                "Bulunulan yerin anlık hava durumu ve bugünden başlayan birkaç günlük tahmini (bugün, yarın, sonraki günler: " +
+                    "durum, en yüksek/en düşük sıcaklık, yağış olasılığı).",
+                props(),
+            ),
+        )
+        .put(
+            fn(
+                "set_volume",
+                "Medya (müzik, radyo) ses düzeyini değiştirir ya da okur. Kullanıcı 'sesi aç/kıs/biraz artır' derse bunu kullan. " +
+                    "Sonuçta yeni düzey yüzde olarak döner.",
+                props(
+                    "action" to enumStr("Yapılacak iş.", listOf("up", "down", "set", "mute", "unmute", "status")),
+                    "percent" to int("Yalnızca 'set' için: hedef düzey, 0–100."),
+                    "steps" to int("'up' / 'down' için kaç kademe (varsayılan 2). 'biraz' = 1–2, 'çok' = 4–5."),
+                ),
+                required = listOf("action"),
+            ),
+        )
+        .put(
+            fn(
+                "current_location",
+                "Aracın şu anki konumunu okur: yakındaki yer ya da sokak adı, semt ve şehir. 'Neredeyiz?' gibi sorular için.",
+                props(),
+            ),
+        )
 
     /** Tek bir araç çağrısını çalıştırır; hata olursa modelin anlayacağı bir `error` döner. */
     suspend fun run(call: ToolCall, backend: AssistantBackend): JSONObject = try {
@@ -136,6 +171,22 @@ object AssistantTools {
             }
             "vehicle_status" -> backend.vehicleStatus()
             "weather" -> backend.weather()
+            "set_volume" -> {
+                val action = when (a.optString("action").lowercase()) {
+                    "up" -> VolumeAction.Up
+                    "down" -> VolumeAction.Down
+                    "set" -> VolumeAction.Set
+                    "mute" -> VolumeAction.Mute
+                    "unmute" -> VolumeAction.Unmute
+                    "status" -> VolumeAction.Status
+                    else -> error("Bilinmeyen ses işlemi: ${a.optString("action")}")
+                }
+                val percent = a.optFloatOrNull("percent")?.let { Math.round(it).coerceIn(0, 100) }
+                if (action == VolumeAction.Set && percent == null) error("'set' için percent (0–100) gerekli.")
+                val steps = a.optFloatOrNull("steps")?.let { Math.round(it).coerceIn(1, 10) } ?: 2
+                backend.volume(action, percent, steps)
+            }
+            "current_location" -> backend.location()
             else -> error("Böyle bir araç yok: ${call.name}")
         }
     } catch (e: kotlinx.coroutines.CancellationException) {

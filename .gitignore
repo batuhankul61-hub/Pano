@@ -13,3 +13,6 @@ captures/
 keystore.properties
 .claude/settings.local.json
 .claude/worktrees/
+
+# Araç firmware paketleri (GB boyutunda; repo dışında tutulur)
+/*.zip

@@ -7,6 +7,11 @@ import android.util.Base64
 import android.util.Log
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -37,11 +42,22 @@ object AssistantKey {
 
     private var loaded = false
 
+    /** Keystore araçta yavaş olabilir: ana iş parçacığını bekletmeden arka planda çözer. */
+    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Composable'dan çağrılabilir: ilk çağrıda anahtar arka planda yüklenir. */
     fun load(context: Context) {
         if (loaded) return
         loaded = true
-        refresh(get(context))
+        val app = context.applicationContext
+        io.launch {
+            val key = get(app)
+            withContext(Dispatchers.Main) { refresh(key) }
+        }
     }
+
+    /** Kayıtlı (şifreli) bir anahtar var mı; Keystore'a dokunmaz, hızlıdır. */
+    fun isStored(context: Context): Boolean = prefs(context).contains(PREF_KEY)
 
     /** Çözülmüş anahtar; yoksa ya da çözülemezse null. Sonucu loglama! */
     fun get(context: Context): String? {
@@ -55,21 +71,32 @@ object AssistantKey {
         }.onFailure { Log.w(TAG, "anahtar çözülemedi (${it.javaClass.simpleName})") }.getOrNull()
     }
 
+    /** Şifreleyip kaydeder; Keystore işi arka planda yapılır, sonuç ana iş parçacığında yansır. */
     fun set(context: Context, key: String) {
         val k = key.trim()
         if (k.isEmpty()) return clear(context)
-        val ok = runCatching {
-            val c = Cipher.getInstance("AES/GCM/NoPadding")
-            c.init(Cipher.ENCRYPT_MODE, secret())
-            val out = c.iv + c.doFinal(k.toByteArray(Charsets.UTF_8))
-            prefs(context).edit().putString(PREF_KEY, Base64.encodeToString(out, Base64.NO_WRAP)).apply()
-        }.onFailure { Log.w(TAG, "anahtar kaydedilemedi (${it.javaClass.simpleName})") }.isSuccess
-        refresh(if (ok) k else null)
+        val app = context.applicationContext
+        loaded = true
+        io.launch {
+            val ok = runCatching {
+                val c = Cipher.getInstance("AES/GCM/NoPadding")
+                c.init(Cipher.ENCRYPT_MODE, secret())
+                val out = c.iv + c.doFinal(k.toByteArray(Charsets.UTF_8))
+                prefs(app).edit().putString(PREF_KEY, Base64.encodeToString(out, Base64.NO_WRAP)).apply()
+            }.onFailure { Log.w(TAG, "anahtar kaydedilemedi (${it.javaClass.simpleName})") }.isSuccess
+            withContext(Dispatchers.Main) {
+                refresh(if (ok) k else null)
+                // Anahtar varsa direksiyondaki tuş Pano'ya geçer.
+                VoiceKey.refresh(app)
+            }
+        }
     }
 
     fun clear(context: Context) {
         prefs(context).edit().remove(PREF_KEY).apply()
         refresh(null)
+        // Anahtar yoksa tuş BYD asistanına geri döner.
+        VoiceKey.refresh(context)
     }
 
     private fun refresh(key: String?) {

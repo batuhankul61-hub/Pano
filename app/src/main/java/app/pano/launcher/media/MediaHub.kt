@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadata
 import android.media.session.MediaController
+import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
@@ -27,6 +28,9 @@ class MediaListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        // Sistem bu hizmeti sürekli bağlı tutar: direksiyondaki sesli asistan tuşu Pano ekranda
+        // açılmamış olsa da dinlenir.
+        app.pano.launcher.assistant.VoiceKey.init(this)
         // Navigasyon zaten başlamışsa mevcut bildirimi hemen al.
         val active = try {
             activeNotifications
@@ -65,7 +69,14 @@ data class NowPlaying(
     val speed: Float,
     val durationMs: Long,
     val packageName: String,
-)
+    /** Çalan şey BYD radyosuysa istasyon bilgisi ([Radio]); değilse null. */
+    val radio: RadioStation? = null,
+) {
+    /** Kartın büyük satırı: radyoda istasyon, müzikte parça adı. */
+    val displayTitle: String get() = radio?.title ?: title
+    /** Küçük satır: radyoda bant/frekans, müzikte sanatçı. */
+    val displaySubtitle: String get() = radio?.subtitle ?: artist
+}
 
 /** Şu an çalan müziği (Spotify, Bluetooth, radyo…) takip eder ve kontrol eder. */
 object MediaHub {
@@ -143,23 +154,57 @@ object MediaHub {
         val manager = context.getSystemService(MediaSessionManager::class.java) ?: return
         val component = ComponentName(context, MediaListenerService::class.java)
         try {
-            manager.addOnActiveSessionsChangedListener({ sessions -> pick(sessions) }, component, mainHandler)
-            pick(manager.getActiveSessions(component))
+            manager.addOnActiveSessionsChangedListener({ sessions -> onSessions(sessions) }, component, mainHandler)
+            onSessions(manager.getActiveSessions(component))
             listening = true
         } catch (_: SecurityException) {
             // Erişim henüz verilmemiş; kullanıcı izin verince tekrar denenir.
         }
     }
 
-    private fun pick(sessions: List<MediaController>?) {
-        val next = sessions?.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
-            ?: sessions?.firstOrNull()
+    /**
+     * Tüm etkin oturumların çalma durumu izlenir (yalnızca gösterilen değil). Gerekçe: bir oturum
+     * listede zaten varken çalmaya başlayınca (BYD medya merkezinin radyo oturumu hep açık durur;
+     * Spotify duraklatılıp radyo açılır) liste değişmez, Pano eski parçada takılı kalıyordu.
+     */
+    private val watched = LinkedHashMap<MediaSession.Token, Pair<MediaController, MediaController.Callback>>()
+
+    private fun onSessions(list: List<MediaController>?) {
+        val now = list.orEmpty()
+        val tokens = now.map { it.sessionToken }.toSet()
+        watched.keys.filter { it !in tokens }.forEach { t -> watched.remove(t)?.let { (c, cb) -> c.unregisterCallback(cb) } }
+        // Sistemin sırası korunur (en son etkin olan önce).
+        val ordered = LinkedHashMap<MediaSession.Token, Pair<MediaController, MediaController.Callback>>()
+        for (c in now) {
+            ordered[c.sessionToken] = watched[c.sessionToken] ?: run {
+                val cb = object : MediaController.Callback() {
+                    override fun onPlaybackStateChanged(state: PlaybackState?) = choose()
+                }
+                c.registerCallback(cb, mainHandler)
+                c to cb
+            }
+        }
+        watched.clear()
+        watched.putAll(ordered)
+        choose()
+    }
+
+    /** Çalan oturum öne çıkar; hiçbiri çalmıyorsa son gösterilen (duraklatılmış) kalır. */
+    private fun choose() {
+        val all = watched.values.map { it.first }
+        val current = controller?.let { c -> all.firstOrNull { it.sessionToken == c.sessionToken } }
+        val next = current?.takeIf { it.isPlaying() }
+            ?: all.firstOrNull { it.isPlaying() }
+            ?: current
+            ?: all.firstOrNull()
         if (next?.sessionToken == controller?.sessionToken) return
         controller?.unregisterCallback(callback)
         controller = next
         next?.registerCallback(callback, mainHandler)
         publish()
     }
+
+    private fun MediaController.isPlaying() = playbackState?.state == PlaybackState.STATE_PLAYING
 
     private fun publish() {
         val c = controller
@@ -169,10 +214,15 @@ object MediaHub {
         }
         val meta = c.metadata
         val playback = c.playbackState
+        val title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty().ifBlank { "Bilinmeyen parça" }
+        val artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)
+            ?: meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST).orEmpty()
+        // BYD medya merkezi radyo modunu kendi anahtarıyla yazar (anahtar yoksa radyo sayılmaz).
+        val mode = meta?.takeIf { it.containsKey(Radio.MODE_KEY) }?.getLong(Radio.MODE_KEY)
         _state.value = NowPlaying(
-            title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty().ifBlank { "Bilinmeyen parça" },
-            artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)
-                ?: meta?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST).orEmpty(),
+            title = title,
+            artist = artist,
+            radio = Radio.parse(c.packageName, mode, title, artist),
             art = meta?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
                 ?: meta?.getBitmap(MediaMetadata.METADATA_KEY_ART)
                 ?: meta?.description?.iconBitmap
