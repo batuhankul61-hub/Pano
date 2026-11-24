@@ -36,7 +36,7 @@ object SystemActions {
      * (bkz. [SystemBars]) hizmet buradan açılır: kullanıcı düğmeye bastığı anda, yalnızca
      * Pano'nun kendi hizmeti eklenir; listedeki diğer hizmetlere dokunulmaz.
      */
-    private fun enableOwnService(context: Context): Boolean {
+    internal fun enableOwnService(context: Context): Boolean {
         if (!SystemBars.canApplyGlobal(context)) return false
         val me = "${context.packageName}/${PanoAccessibility::class.java.name}"
         return runCatching {
@@ -76,8 +76,9 @@ object SystemActions {
 }
 
 /**
- * Yalnızca sistem düğmelerine basmak için (geri, son uygulamalar, yarım ekran). Ekran içeriğini
- * okumaz, olay dinlemez; yapılandırma res/xml/pano_accessibility.xml'de.
+ * Sistem düğmelerine basmak için (geri, son uygulamalar, yarım ekran). Ekran içeriğini okumaz;
+ * yalnızca "pencere değişti" olaylarından öndeki uygulamanın paket adını alır ([ForegroundApp]:
+ * alt şerit aracın kendi ana ekranında gizlenir). Yapılandırma res/xml/pano_accessibility.xml'de.
  */
 class PanoAccessibility : AccessibilityService() {
     override fun onServiceConnected() {
@@ -97,7 +98,11 @@ class PanoAccessibility : AccessibilityService() {
         super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            ForegroundApp.onWindowChanged(this, event.packageName?.toString(), event.className?.toString())
+        }
+    }
     override fun onInterrupt() {}
 
     companion object {

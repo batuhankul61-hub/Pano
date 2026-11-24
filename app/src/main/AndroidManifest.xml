@@ -25,6 +25,11 @@
         tools:ignore="ProtectedPermissions" />
 
     <queries>
+        <!-- Aracın kendi ana ekranı: Pano'nun alt şeridi orada gizlenir (system/ForegroundApp.kt). -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

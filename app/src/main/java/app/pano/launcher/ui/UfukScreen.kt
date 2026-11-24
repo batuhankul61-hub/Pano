@@ -94,6 +94,8 @@ import app.pano.launcher.settings.LocalStyle
 import app.pano.launcher.ui.theme.Accent
 import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.ui.theme.PanoColors
+import app.pano.launcher.ui.theme.activeColor
+import app.pano.launcher.ui.theme.onActiveColor
 import app.pano.launcher.vehicle.ClimateState
 import app.pano.launcher.vehicle.Gear
 import app.pano.launcher.vehicle.Opening
@@ -737,29 +739,51 @@ private fun DrivingGate(title: String, onClose: () -> Unit, content: @Composable
 
 // ───────────────────────── Alt çubuk ─────────────────────────
 
+/**
+ * Alt çubuk. [outside] = Pano arkadayken başka uygulamanın üstünde duran kopya: en solda Pano'ya
+ * dönüş düğmesi, ayrı zemin ve kalın üst kenar (uygulamadan net ayrılsın). [onClimate] verilirse
+ * Klima ve sıcaklık sayıları Pano'yu açmak yerine onu çağırır (şeridin üstündeki klima kartı).
+ */
 @Composable
 private fun BottomBar(
     climate: ClimateState, screen: Screen, panel: UfukPanel?, volume: UfukVolume, onNavigate: (Screen) -> Unit, modifier: Modifier,
     outside: Boolean = false,
+    climateOpen: Boolean = false,
+    onHome: (() -> Unit)? = null,
+    onClimate: (() -> Unit)? = null,
 ) {
     val c = LocalPano.current
     val context = LocalContext.current
     val playing by MediaHub.state.collectAsState()
     val locked = ufukDrivingLocked()
     fun toggle(target: Screen) = onNavigate(if (screen == target) Screen.Home else target)
+    val openClimate = onClimate ?: { toggle(Screen.Climate) }
 
+    val surface = if (outside) overlayBarColor(c) else c.background
+    val edge = if (outside) overlayEdgeColor(c) else c.hairline
+    val edgeWidth = if (outside) 3.dp else 1.dp
     Row(
-        modifier.background(c.background).drawBehind { drawLine(c.hairline, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(size.width, 0f), 1.dp.toPx()) }
+        modifier.background(surface).drawBehind {
+            val w = edgeWidth.toPx()
+            drawRect(edge, size = androidx.compose.ui.geometry.Size(size.width, w))
+        }
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (onHome != null) {
+            HomeButton(onHome)
+            Box(Modifier.padding(start = 12.dp, end = 4.dp).width(1.dp).height(48.dp).background(edge))
+        }
         BarTemp(
-            "Sürücü", climate.driver, climate.isOff,
+            "Sürücü", climate.driver, climate.step, climate.isOff,
             onDown = { climate.changeDriver(-0.5f) }, onUp = { climate.changeDriver(0.5f) },
-            onOpen = { toggle(Screen.Climate) },
+            onOpen = openClimate,
         )
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
-            BarApp(PanoIcons.Music, "Müzik", active = panel == UfukPanel.Music) {
+            BarApp(
+                PanoIcons.Music, if (playing?.isPlaying == true) "Müzik, çalıyor" else "Müzik",
+                active = panel == UfukPanel.Music, playing = playing?.isPlaying == true,
+            ) {
                 when {
                     // Başka uygulamanın üstündeki şeritten: müzik kartı Pano'da açılır.
                     outside && (playing != null || Launch.hasRadio(context)) -> { AppSheet.openMusic(); onNavigate(Screen.Home) }
@@ -771,72 +795,323 @@ private fun BottomBar(
                 }
             }
             BarApp(PanoIcons.Phone, "Telefon") { Launch.phone(context) }
-            BarApp(PanoIcons.Fan, "Klima", active = panel == UfukPanel.Climate) { toggle(Screen.Climate) }
+            BarApp(PanoIcons.Fan, "Klima", active = panel == UfukPanel.Climate || climateOpen) { openClimate() }
             BarApp(PanoIcons.Apps, "Uygulamalar", active = panel == UfukPanel.Apps, dimmed = locked) { toggle(Screen.Apps) }
             BarApp(PanoIcons.Sliders, "Ayarlar", active = panel == UfukPanel.Settings, dimmed = locked) { toggle(Screen.Settings) }
         }
         if (climate.dualZone) {
             BarTemp(
-                "Yolcu", climate.passenger, climate.isOff,
+                "Yolcu", climate.passenger, climate.step, climate.isOff,
                 onDown = { climate.changePassenger(-0.5f) }, onUp = { climate.changePassenger(0.5f) },
-                onOpen = { toggle(Screen.Climate) },
+                onOpen = openClimate,
             )
         }
-        Box(Modifier.padding(horizontal = 12.dp).width(1.dp).height(48.dp).background(c.hairline))
+        Box(Modifier.padding(horizontal = 12.dp).width(1.dp).height(48.dp).background(edge))
         VolumeControl(volume)
     }
 }
 
-/**
- * Pano arkadayken başka uygulamaların üstünde duran alt şerit ([app.pano.launcher.system.BarOverlay]).
- * Pano'dakiyle aynı çubuk; kart açan düğmeler Pano'yu o kartla öne getirir ([onOpen]).
- */
+/** Uygulamaların üstündeki şeridin zemini: gündüz uygulamaların beyazından ayrılan gri, gece neredeyse siyah. */
+private fun overlayBarColor(c: PanoColors): Color = if (c.isDark) Color(0xFF0A0A0B) else Color(0xFFE6E6EB)
+
+/** Şerit ile uygulama arasındaki kalın kenar ve ayırıcılar. */
+private fun overlayEdgeColor(c: PanoColors): Color = if (c.isDark) Color(0xFF3A3A3F) else Color(0xFFB8B8C0)
+
+/** Pano'ya (ana sayfaya) dönüş: şeridin en solunda, en büyük düğme. */
 @Composable
-fun UfukOverlayBar(onOpen: (Screen) -> Unit) {
-    val context = LocalContext.current
-    val climate = remember { app.pano.launcher.vehicle.ClimateStore.load(context) }
-    val volume = rememberUfukVolume(showUi = true)
-    DesignCanvas(designWidth = 1600f, designHeight = BarHeight.value) {
-        BottomBar(climate, Screen.Home, null, volume, onOpen, Modifier.fillMaxSize(), outside = true)
+private fun HomeButton(onClick: () -> Unit) {
+    val c = LocalPano.current
+    Box(
+        Modifier.width(104.dp).height(80.dp).clip(RoundedCornerShape(22.dp))
+            .background(if (c.isDark) c.raised else c.card)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "Pano ana sayfası" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(PanoIcons.Home, contentDescription = null, tint = c.text, modifier = Modifier.size(38.dp))
     }
 }
 
-/** Sıcaklık: oklar ≥72 dp, sayıya dokununca klima kartı açılır. */
+/**
+ * Alt çubuktaki sıcaklık yazısı. İki bölge her zaman aynı biçimde: araç yarım derece kabul ediyorsa
+ * hep bir ondalık ("22,0°", "21,5°"), tam derece kabul ediyorsa hiç ("22°").
+ */
+internal fun barTempText(t: Float, step: Float): String =
+    if (step >= 1f) "${Math.round(t)}°" else String.format(trLocale, "%.1f°", t)
+
+/** Rakamlar eşit genişlikte (Inter "tnum"): sıcaklık değişince şerit oynamaz. */
 @Composable
-private fun BarTemp(who: String, value: Float, off: Boolean, onDown: () -> Unit, onUp: () -> Unit, onOpen: () -> Unit) {
+private fun tabular() = androidx.compose.material3.LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+
+/** Sıcaklık: oklar ≥72 dp, sayıya dokununca klima kartı açılır. Sayının kutusu sabit genişlikte. */
+@Composable
+private fun BarTemp(who: String, value: Float, step: Float, off: Boolean, onDown: () -> Unit, onUp: () -> Unit, onOpen: () -> Unit) {
     val c = LocalPano.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         RoundIconButton(PanoIcons.ChevronLeft, "$who sıcaklığını düşür", onDown, Color.Transparent, c.secondary, size = 72.dp, iconSize = 30.dp)
         Box(
-            Modifier.width(104.dp).height(72.dp).clip(RoundedCornerShape(20.dp))
+            Modifier.width(128.dp).height(72.dp).clip(RoundedCornerShape(20.dp))
                 .clickable(role = Role.Button, onClickLabel = "Klima") { onOpen() }
                 .semantics { contentDescription = "$who sıcaklığı" },
             contentAlignment = Alignment.Center,
         ) {
-            Text(if (off) "Kapalı" else shortTemp(value), color = c.text, fontSize = if (off) 24.sp else 36.sp, fontWeight = FontWeight.Normal, letterSpacing = (-1).sp)
+            Text(
+                if (off) "Kapalı" else barTempText(value, step), color = c.text, fontSize = if (off) 24.sp else 34.sp,
+                fontWeight = FontWeight.Normal, letterSpacing = (-0.5).sp, maxLines = 1,
+                style = tabular(),
+            )
         }
         RoundIconButton(PanoIcons.ChevronRight, "$who sıcaklığını artır", onUp, Color.Transparent, c.secondary, size = 72.dp, iconSize = 30.dp)
     }
 }
 
-/** Tek renk uygulama düğmesi; etkin olan açık zeminle belirginleşir. */
+/**
+ * Tek renk uygulama düğmesi. Etkin olan vurgu renginde dolu (tek renkte gündüz siyah, gece beyaz):
+ * güneşte de seçilir. [playing] ise ikonun altında küçük bir ses dalgası durur.
+ */
 @Composable
-private fun BarApp(icon: ImageVector, label: String, active: Boolean = false, dimmed: Boolean = false, onClick: () -> Unit) {
+private fun BarApp(
+    icon: ImageVector, label: String, active: Boolean = false, dimmed: Boolean = false, playing: Boolean = false, onClick: () -> Unit,
+) {
     val c = LocalPano.current
+    val fg = when {
+        active -> onActiveColor()
+        dimmed -> c.tertiary
+        playing -> c.text
+        else -> c.secondary
+    }
     Box(
         Modifier.width(96.dp).height(80.dp).clip(RoundedCornerShape(22.dp))
-            .background(if (active) c.raised else Color.Transparent)
+            .background(if (active) activeColor() else Color.Transparent)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon, contentDescription = null, modifier = Modifier.size(34.dp),
-            tint = when {
-                dimmed -> c.tertiary
-                active -> c.text
-                else -> c.secondary
-            },
+        Icon(icon, contentDescription = null, modifier = Modifier.size(34.dp), tint = fg)
+        if (playing) PlayingBars(fg, Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp))
+    }
+}
+
+/** "Çalıyor" işareti: üç kısa çubuk. Hareketsiz; şerit sürekli yeniden çizilmesin. */
+@Composable
+private fun PlayingBars(color: Color, modifier: Modifier) {
+    Row(modifier.height(10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        listOf(6.dp, 10.dp, 7.dp).forEach { h ->
+            Box(Modifier.width(4.dp).height(h).clip(RoundedCornerShape(2.dp)).background(color))
+        }
+    }
+}
+
+// ───────────────────────── Uygulamaların üstündeki şerit ─────────────────────────
+
+/** Şeridin üstünde açılan küçük pencere. Aynı anda biri. */
+internal enum class OverlayPopup { Climate, Volume }
+
+/** Uygulamaların üstündeki şeridin durumu; [app.pano.launcher.system.BarOverlay] dışarı dokununca kapatır. */
+internal object UfukOverlayState {
+    var popup by mutableStateOf<OverlayPopup?>(null)
+    fun dismiss() { popup = null }
+}
+
+/** Şeridin üstünde, açılan pencere için ayrılan yükseklik (tasarım birimi). */
+private fun popupHeight(p: OverlayPopup?): Dp = when (p) {
+    OverlayPopup.Climate -> 252.dp
+    OverlayPopup.Volume -> 116.dp
+    null -> 0.dp
+}
+
+/**
+ * Pano arkadayken başka uygulamaların üstünde duran alt şerit ([app.pano.launcher.system.BarOverlay]).
+ * Pano'dakiyle aynı çubuk; en solda Pano'ya dönüş. Klima ve ses uygulamadan çıkmadan şeridin
+ * üstünde açılır; pencere o sırada [onHeight] ile büyür, kapanınca yine şerit boyuna iner.
+ * Klima kartı açıkken pencere tüm ekranı kaplar (null): uygulama hafifçe kararır ve dışarı
+ * dokunmak yalnızca kartı kapatır, alttaki uygulamada yanlışlıkla bir şeye basılmaz.
+ * Ses göstergesi kısa sürdüğü için yalnızca şeridin üstündeki şerit kadar yer alır.
+ * Uygulamalar, Ayarlar ve Müzik Pano'yu o kartla öne getirir ([onOpen]).
+ *
+ * [scale]: tasarım tuvalinin (1600 birim genişlik) ekrandaki ölçeği; Pano'daki şeritle aynı boy.
+ */
+@Composable
+fun UfukOverlayBar(scale: Float, onOpen: (Screen) -> Unit, onHeight: (designHeight: Float?) -> Unit) {
+    val context = LocalContext.current
+    val climate = remember { app.pano.launcher.vehicle.ClimateStore.load(context) }
+    val volume = rememberUfukVolume()
+    val popup = UfukOverlayState.popup
+
+    // Ses düğmesine dokununca gösterge açılır; son dokunuştan bir süre sonra kapanır.
+    LaunchedEffect(volume.touchedAt) {
+        if (volume.touchedAt == 0L) return@LaunchedEffect
+        UfukOverlayState.popup = OverlayPopup.Volume
+        delay(VolumeHudMs)
+        if (UfukOverlayState.popup == OverlayPopup.Volume) UfukOverlayState.dismiss()
+    }
+    // Pencere açılırken hemen büyür; kapanırken kayma bitince şerit boyuna iner (dokunuşlar yine uygulamaya).
+    LaunchedEffect(popup) {
+        if (popup == null) delay(UfukMotionMs.toLong())
+        onHeight(if (popup == OverlayPopup.Climate) null else BarHeight.value + popupHeight(popup).value)
+    }
+    DisposableEffect(Unit) { onDispose { UfukOverlayState.dismiss() } }
+
+    val density = LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalDensity provides androidx.compose.ui.unit.Density(density.density * scale, 1f),
+    ) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
+            // Kartın dışındaki alan: dokununca kart kapanır. Klima açıkken uygulama hafifçe kararır.
+            val scrim by animateFloatAsState(if (popup == OverlayPopup.Climate) 1f else 0f, tween(UfukMotionMs), label = "karartma")
+            Box(
+                Modifier.fillMaxWidth().weight(1f)
+                    .drawBehind { if (scrim > 0f) drawRect(Color.Black.copy(alpha = 0.32f * scrim)) }
+                    .pointerInput(Unit) { detectTapGestures { UfukOverlayState.dismiss() } },
+            ) {
+                androidx.compose.animation.AnimatedVisibility(
+                    popup == OverlayPopup.Climate,
+                    enter = fadeIn(tween(UfukMotionMs / 2)) + slideInVertically(tween(UfukMotionMs)) { it },
+                    exit = fadeOut(tween(UfukMotionMs)) + slideOutVertically(tween(UfukMotionMs)) { it },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                ) {
+                    OverlayClimateCard(climate) { UfukOverlayState.dismiss() }
+                }
+                androidx.compose.animation.AnimatedVisibility(
+                    popup == OverlayPopup.Volume,
+                    enter = fadeIn(tween(UfukMotionMs / 2)) + slideInVertically(tween(UfukMotionMs)) { it },
+                    exit = fadeOut(tween(UfukMotionMs)) + slideOutVertically(tween(UfukMotionMs)) { it },
+                    // Ses düğmelerinin hemen üstünde.
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 12.dp),
+                ) {
+                    VolumeHudBody(volume, Modifier.swallowTaps(), edge = overlayEdgeColor(LocalPano.current))
+                }
+            }
+            BottomBar(
+                climate, Screen.Home, null, volume, onOpen, Modifier.fillMaxWidth().height(BarHeight),
+                outside = true,
+                climateOpen = popup == OverlayPopup.Climate,
+                onHome = { onOpen(Screen.Home) },
+                onClimate = {
+                    UfukOverlayState.popup = if (UfukOverlayState.popup == OverlayPopup.Climate) null else OverlayPopup.Climate
+                },
+            )
+        }
+    }
+}
+
+/** Kartın boş yerine dokunmak dışarı dokunmak sayılmasın. */
+private fun Modifier.swallowTaps(): Modifier = pointerInput(Unit) { detectTapGestures { } }
+
+/**
+ * Şeridin üstünde açılan kompakt klima kartı: iki bölge sıcaklığı, fan, Otomatik, A/C ve hava yönü.
+ * Tüm kontroller 72 dp. Durum Pano'daki tekil [ClimateState]; değişiklik araca da gider.
+ */
+@Composable
+private fun OverlayClimateCard(climate: ClimateState, onClose: () -> Unit) {
+    val c = LocalPano.current
+    val shape = RoundedCornerShape(28.dp)
+    Row(
+        Modifier.fillMaxWidth().height(popupHeight(OverlayPopup.Climate) - 24.dp).swallowTaps()
+            .clip(shape).background(c.card).border(2.dp, overlayEdgeColor(c), shape)
+            .padding(horizontal = 20.dp, vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ZoneTemp("Sürücü", climate.driver, climate.step, climate.isOff, { climate.changeDriver(-0.5f) }, { climate.changeDriver(0.5f) })
+        CardDivider()
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RoundIconButton(PanoIcons.Minus, "Fanı azalt", { climate.setFanLevel(climate.fan - 1) }, c.raised, c.text, size = 72.dp, iconSize = 26.dp)
+                Row(
+                    Modifier.weight(1f).height(56.dp).padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (level in 1..7) {
+                        Box(
+                            Modifier.weight(1f).height((14 + level * 6f).dp).clip(RoundedCornerShape(6.dp))
+                                .background(if (level <= climate.fan) activeColor() else c.raised)
+                                .clickable(role = Role.Button) { climate.setFanLevel(level) },
+                        )
+                    }
+                }
+                RoundIconButton(PanoIcons.Plus, "Fanı artır", { climate.setFanLevel(climate.fan + 1) }, c.raised, c.text, size = 72.dp, iconSize = 26.dp)
+                Text(
+                    when {
+                        climate.isOff -> "Kapalı"
+                        else -> "Fan ${climate.fan}"
+                    },
+                    color = c.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    textAlign = TextAlign.End, modifier = Modifier.width(104.dp),
+                    style = tabular(),
+                )
+            }
+            val air = app.pano.launcher.vehicle.AirMode.of(climate.airMode) ?: app.pano.launcher.vehicle.AirMode.FaceFeet
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ClimateChip("Otomatik", null, climate.auto, Modifier.weight(1.3f)) { climate.auto = !climate.auto }
+                ClimateChip("A/C", PanoIcons.Snow, climate.ac, Modifier.weight(1f)) { climate.ac = !climate.ac }
+                listOf(
+                    Triple(app.pano.launcher.vehicle.AirMode.Outlet.Face, "Yüz", PanoIcons.AirFace),
+                    Triple(app.pano.launcher.vehicle.AirMode.Outlet.Feet, "Ayak", PanoIcons.AirFeet),
+                    Triple(app.pano.launcher.vehicle.AirMode.Outlet.Windshield, "Cam", PanoIcons.Defrost),
+                ).forEach { (outlet, label, icon) ->
+                    ClimateChip(label, icon, air.has(outlet), Modifier.weight(1f)) {
+                        // BYD'de yön seçmek otomatik klimadan çıkarır (Klima kartındaki gibi).
+                        climate.airMode = air.toggle(outlet, climate.airModeCount).code
+                        climate.auto = false
+                    }
+                }
+            }
+        }
+        CardDivider()
+        if (climate.dualZone) {
+            ZoneTemp("Yolcu", climate.passenger, climate.step, climate.isOff, { climate.changePassenger(-0.5f) }, { climate.changePassenger(0.5f) })
+        }
+        Column(
+            Modifier.padding(start = 12.dp).fillMaxHeight(),
+            horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            RoundIconButton(PanoIcons.Close, "Klimayı kapat", onClose, c.raised, c.text, size = 72.dp, iconSize = 24.dp)
+            // Araca bağlı değilken ayarlar yalnızca Pano'da kalır; uydurma "gönderildi" izlenimi verme.
+            if (!climate.linked) Text("Önizleme", color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun CardDivider() {
+    Box(Modifier.padding(horizontal = 18.dp).width(1.dp).fillMaxHeight(0.8f).background(LocalPano.current.hairline))
+}
+
+/** Bir bölgenin sıcaklığı: üstte ad, altta − sayı +. */
+@Composable
+private fun ZoneTemp(who: String, value: Float, step: Float, off: Boolean, onDown: () -> Unit, onUp: () -> Unit) {
+    val c = LocalPano.current
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(who, color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            RoundIconButton(PanoIcons.Minus, "$who sıcaklığını düşür", onDown, c.raised, c.text, size = 72.dp, iconSize = 26.dp)
+            Text(
+                if (off) "Kapalı" else barTempText(value, step), color = c.text,
+                fontSize = if (off) 26.sp else 46.sp, fontWeight = FontWeight.Light, letterSpacing = (-1).sp,
+                textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.width(150.dp),
+                style = tabular(),
+            )
+            RoundIconButton(PanoIcons.Plus, "$who sıcaklığını artır", onUp, c.raised, c.text, size = 72.dp, iconSize = 26.dp)
+        }
+    }
+}
+
+/** Klima kartındaki aç/kapa: açıkken vurgu renginde dolu. */
+@Composable
+private fun ClimateChip(label: String, icon: ImageVector?, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val c = LocalPano.current
+    val fg = if (on) onActiveColor() else c.text
+    Row(
+        modifier.height(72.dp).clip(RoundedCornerShape(20.dp)).background(if (on) activeColor() else c.raised)
+            .clickable(role = Role.Switch, onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = "$label ${if (on) "açık" else "kapalı"}" },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        if (icon != null) Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(26.dp).padding(end = 0.dp))
+        Text(
+            label, color = fg, fontSize = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            modifier = Modifier.padding(start = if (icon != null) 8.dp else 0.dp),
         )
     }
 }
@@ -845,12 +1120,10 @@ private fun BarApp(icon: ImageVector, label: String, active: Boolean = false, di
 private const val VolumeHudMs = 2_500L
 
 /**
- * Medya sesinin durumu. Alt çubuktaki düğmeler ve haritanın üstündeki gösterge aynı durumu paylaşır.
- * Sistem ses paneli açılmaz (FLAG_SHOW_UI yok); yerine Ufuk'un kendi göstergesi çıkar.
+ * Medya sesinin durumu. Alt çubuktaki düğmeler ve göstergesi aynı durumu paylaşır.
+ * Sistem ses paneli hiçbir yerde açılmaz (FLAG_SHOW_UI yok); yerine Ufuk'un kendi göstergesi çıkar.
  */
-private class UfukVolume(private val audio: AudioManager?, showUi: Boolean = false) {
-    /** Pano dışında Ufuk'un ses göstergesi yok; o zaman sistemin ses paneli gösterilir. */
-    private val flags = if (showUi) AudioManager.FLAG_SHOW_UI else 0
+private class UfukVolume(private val audio: AudioManager?) {
     val max: Int = (audio?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 1).coerceAtLeast(1)
     var level by mutableIntStateOf(audio?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0)
         private set
@@ -868,7 +1141,7 @@ private class UfukVolume(private val audio: AudioManager?, showUi: Boolean = fal
     }
 
     fun adjust(direction: Int) {
-        runCatching { audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, flags) }
+        runCatching { audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0) }
         refresh()
         touchedAt = SystemClock.uptimeMillis()
     }
@@ -887,9 +1160,9 @@ private class UfukVolume(private val audio: AudioManager?, showUi: Boolean = fal
 }
 
 @Composable
-private fun rememberUfukVolume(showUi: Boolean = false): UfukVolume {
+private fun rememberUfukVolume(): UfukVolume {
     val context = LocalContext.current
-    val volume = remember { UfukVolume(context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager, showUi) }
+    val volume = remember { UfukVolume(context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager) }
     // Direksiyondan ya da başka uygulamadan değişen ses de alt çubuğa yansısın.
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
@@ -927,12 +1200,10 @@ private fun VolumeControl(volume: UfukVolume) {
 
 /**
  * Ses göstergesi: haritanın sağ altında, ses düğmelerinin hemen üstünde açılan opak hap.
- * Hoparlör, sürüklenebilir çubuk ve seviye. Çubuğa dokunmak ya da sürüklemek sesi ayarlar.
- * Tek renk; yalnızca sessizde kırmızı.
+ * Son dokunuştan [VolumeHudMs] sonra kaybolur.
  */
 @Composable
 private fun VolumeHud(volume: UfukVolume, modifier: Modifier) {
-    val c = LocalPano.current
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(volume.touchedAt) {
         if (volume.touchedAt == 0L) return@LaunchedEffect
@@ -946,48 +1217,60 @@ private fun VolumeHud(volume: UfukVolume, modifier: Modifier) {
         exit = fadeOut(tween(UfukMotionMs)) + slideOutVertically(tween(UfukMotionMs)) { it / 3 },
         modifier = modifier,
     ) {
-        val silent = volume.muted || volume.level == 0
-        val fraction = if (volume.muted) 0f else volume.level / volume.max.toFloat()
-        val shown by animateFloatAsState(fraction, tween(UfukMotionMs / 2), label = "ses-seviyesi")
-        val shape = RoundedCornerShape(44.dp)
-        Row(
-            Modifier.height(88.dp).clip(shape).background(c.card).border(1.dp, c.hairline, shape)
-                .padding(start = 26.dp, end = 30.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                if (silent) PanoIcons.SpeakerOff else PanoIcons.Speaker, contentDescription = null,
-                tint = if (volume.muted) Accent.Red else c.text, modifier = Modifier.size(30.dp),
-            )
-            // Dokunma alanı çubuktan yüksek (88 dp); görünen çubuk ince.
-            BoxWithConstraints(
-                Modifier.padding(horizontal = 22.dp).width(360.dp).fillMaxHeight()
-                    .semantics { contentDescription = "Ses seviyesi" }
-                    .pointerInput(volume.max) {
-                        fun at(x: Float) = volume.set(Math.round(x / size.width * volume.max))
-                        detectTapGestures { at(it.x) }
-                    }
-                    .pointerInput(volume.max) {
-                        fun at(x: Float) = volume.set(Math.round(x / size.width * volume.max))
-                        detectHorizontalDragGestures(onDragStart = { at(it.x) }) { change, _ -> at(change.position.x) }
-                    },
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Box(Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)).background(c.raised)) {
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(shown).clip(RoundedCornerShape(6.dp)).background(c.text))
+        VolumeHudBody(volume)
+    }
+}
+
+/**
+ * Ses göstergesinin kendisi: hoparlör, sürüklenebilir çubuk ve seviye. Çubuğa dokunmak ya da
+ * sürüklemek sesi ayarlar. Tek renk; yalnızca sessizde kırmızı.
+ */
+@Composable
+private fun VolumeHudBody(volume: UfukVolume, modifier: Modifier = Modifier, edge: Color? = null) {
+    val c = LocalPano.current
+    val silent = volume.muted || volume.level == 0
+    val fraction = if (volume.muted) 0f else volume.level / volume.max.toFloat()
+    val shown by animateFloatAsState(fraction, tween(UfukMotionMs / 2), label = "ses-seviyesi")
+    val shape = RoundedCornerShape(44.dp)
+    Row(
+        modifier.height(88.dp).clip(shape).background(c.card)
+            .then(if (edge != null) Modifier.border(2.dp, edge, shape) else Modifier.border(1.dp, c.hairline, shape))
+            .padding(start = 26.dp, end = 30.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (silent) PanoIcons.SpeakerOff else PanoIcons.Speaker, contentDescription = null,
+            tint = if (volume.muted) Accent.Red else c.text, modifier = Modifier.size(30.dp),
+        )
+        // Dokunma alanı çubuktan yüksek (88 dp); görünen çubuk ince.
+        BoxWithConstraints(
+            Modifier.padding(horizontal = 22.dp).width(360.dp).fillMaxHeight()
+                .semantics { contentDescription = "Ses seviyesi" }
+                .pointerInput(volume.max) {
+                    fun at(x: Float) = volume.set(Math.round(x / size.width * volume.max))
+                    detectTapGestures { at(it.x) }
                 }
-                // Tutamak: dolu kısmın ucunda.
-                Box(
-                    Modifier.offset(x = (maxWidth - 28.dp) * shown).size(28.dp).clip(CircleShape)
-                        .background(c.text).border(3.dp, c.card, CircleShape),
-                )
+                .pointerInput(volume.max) {
+                    fun at(x: Float) = volume.set(Math.round(x / size.width * volume.max))
+                    detectHorizontalDragGestures(onDragStart = { at(it.x) }) { change, _ -> at(change.position.x) }
+                },
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)).background(c.raised)) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(shown).clip(RoundedCornerShape(6.dp)).background(c.text))
             }
-            Text(
-                if (volume.muted) "Sessiz" else volume.level.toString(),
-                color = if (volume.muted) Accent.Red else c.text,
-                fontSize = if (volume.muted) 22.sp else 30.sp, fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.End, maxLines = 1, modifier = Modifier.width(84.dp),
+            // Tutamak: dolu kısmın ucunda.
+            Box(
+                Modifier.offset(x = (maxWidth - 28.dp) * shown).size(28.dp).clip(CircleShape)
+                    .background(c.text).border(3.dp, c.card, CircleShape),
             )
         }
+        Text(
+            if (volume.muted) "Sessiz" else volume.level.toString(),
+            color = if (volume.muted) Accent.Red else c.text,
+            fontSize = if (volume.muted) 22.sp else 30.sp, fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.End, maxLines = 1, modifier = Modifier.width(84.dp),
+            style = tabular(),
+        )
     }
 }
