@@ -10,7 +10,10 @@ import java.time.format.TextStyle
 import app.pano.launcher.media.MediaHub
 import app.pano.launcher.navigation.NavPhase
 import app.pano.launcher.navigation.PanoNav
+import app.pano.launcher.navigation.Place
 import app.pano.launcher.navigation.RouteEngine
+import app.pano.launcher.navigation.SavedPlaces
+import app.pano.launcher.navigation.Shortcut
 import app.pano.launcher.settings.Settings
 import app.pano.launcher.vehicle.ClimateStore
 import app.pano.launcher.vehicle.SpeedSource
@@ -75,6 +78,23 @@ class PanoBackend(private val context: Context) : AssistantBackend {
         val here = PanoNav.lastLocation ?: PanoNav.bestLastKnown(context)
         val places = RouteEngine.search(query, here?.latitude, here?.longitude)
         val place = places.firstOrNull() ?: return JSONObject().put("error", "\"$query\" için yer bulunamadı.")
+        return routeTo(place, start)
+            .apply { if (!has("error")) put("other_matches", JSONArray(places.drop(1).take(2).map { listOf(it.name, it.detail).filter(String::isNotBlank).joinToString(", ") })) }
+    }
+
+    override suspend fun navigateToSaved(shortcut: Shortcut, start: Boolean): JSONObject {
+        PanoNav.init(context)
+        SavedPlaces.init(context)
+        val place = SavedPlaces.places.value[shortcut]
+            ?: return JSONObject().put(
+                "error",
+                "${shortcut.label} adresi kayıtlı değil. Kullanıcı Nereye? kartında '${shortcut.label} ekle' ile kaydedebilir.",
+            )
+        return routeTo(place, start).put("saved_shortcut", shortcut.label)
+    }
+
+    /** Önizleme açar, rota hesaplanınca istenirse başlatır; sonucu modele özetler. */
+    private suspend fun routeTo(place: Place, start: Boolean): JSONObject {
         withContext(Dispatchers.Main) { PanoNav.preview(context, place) }
         val session = withTimeoutOrNull(20_000) {
             PanoNav.state.first { it == null || !it.loading }
@@ -88,7 +108,6 @@ class PanoBackend(private val context: Context) : AssistantBackend {
             .put("distance_km", (route.lengthM / 100).roundToInt() / 10.0)
             .put("duration_min", (route.timeS / 60).roundToInt())
             .put("started", start && PanoNav.state.value?.phase == NavPhase.Active)
-            .put("other_matches", JSONArray(places.drop(1).take(2).map { listOf(it.name, it.detail).filter(String::isNotBlank).joinToString(", ") }))
     }
 
     override suspend fun stopNavigation(): JSONObject = withContext(Dispatchers.Main) {
