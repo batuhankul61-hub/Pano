@@ -220,3 +220,36 @@ yine protokole göre çözülür, yansımayla okunur.
 Bir grubun tam alan listesi için derlenmiş kaynakta
 `android/hardware/bydauto/<grup>/BYDAuto<Grup>Device.java` ve tüm kimlikler için
 `BYDAutoFeatureIds.java` (iç sınıflar `BYDAutoFeatureIds$<Grup>`) incelenir.
+
+---
+
+## 4. Konfor: koltuk ve direksiyon — Setting, tür 1023
+
+`BYDAutoSettingDevice` (firmware 13.1.33). Kimlikler üst sınıfta (`BYDAutoFeatureIds.SET_*`);
+Pano `vehicle/BydComfort.kt` ile okur (önce tür 1023, sonra genel tür).
+
+| Sinyal | Okuma alanı | Yazma alanı | Değerler |
+|--------|-------------|-------------|----------|
+| Sürücü koltuğu ısıtma | `SET_DRIVER_SEAT_HEATING_STATE` | `..._SET` | 1 kapalı, 2 düşük, 3 yüksek, 4 üç kademelide en yüksek (sürücüde 5/6 tek kademe aç/kapa komutları) |
+| Yolcu koltuğu ısıtma | `SET_PASSENGER_SEAT_HEATING_STATE` | `..._SET` | 1..4 |
+| Koltuk havalandırma | `SET_DRIVER/PASSENGER_SEAT_VENTILATING_STATE` | `..._SET` | 1 kapalı, 2 düşük, 3 yüksek |
+| Var mı | `SET_HAS_DRIVER_SEAT_HEATING`, `SET_HAS_PASSENGER_SEAT_HEATING`, `SET_HAS_*_SEAT_VENTILATING`, `SET_HAS_SEAT_HEATING_AND_VENTILATING` | — | BYD `hasFeature`: 1/2/3 = var, 0 = yok, 65535 = bilinmiyor |
+| Tek kademeli ısıtma | `SET_DRIVER_SEAT_HEATING_STATE1` = 994050114, yolcu 994050116 | aynı `_SET` (1 kapalı / 3 açık) | 1 kapalı, 2 açık (Pano okumuyor) |
+| Direksiyon ısıtma | ham `1116733454` (`SET_STEERING_WHEEL_HEAT_STATE`) | `SET_STEERING_WHEEL_HEAT_STATE_SET` | 0 geçersiz, 1 kapalı, 2 açık |
+
+> Not: `VehicleFeatures.has()` "var" için yalnız 1'i sayıyor; BYD'nin kendi `hasFeature`'ı 1/2/3'ü
+> sayıyor. Klima kartındaki koltuk ısıtma görünürlüğü bu yüzden eksik kalabilir.
+
+**Araçta doğrulanmadı (Kasım 2026):** Atto 2'nin bu sinyalleri yayınlayıp yayınlamadığı, kademe
+ölçeği ve yazmanın `setInt` ile (imza izni isteyen `BYDAutoSettingDevice` olmadan) kabul edilip
+edilmediği. Pano ham değerleri `BydComfort` etiketiyle, değiştikçe loglar.
+
+### İlgili SystemUI bulguları (BYD hızlı ayarlar menüsü, `com.byd.bydqsmodeslib`)
+
+- Parlaklık (`view/BydBrightnessView`): Android 10'da `Settings.System.screen_brightness` yazıyor;
+  aralık `PowerManager.getMinimum/MaximumScreenBrightnessSetting`. Model 15/92'de gece modunda
+  (`CarSettings.Global sys_day_or_night` = false) aralık %28–%60'a daralıyor.
+- Ekranı kapat (`item/dilink/ScreenOffItem` → `BydScreenOffManager.startScreenOff`):
+  `PowerManager.TurnBacklightOff` (`DEVICE_POWER` gerekir) + `android.intent.action.SCREEN_OFF_CLICK`
+  yayını. `TurnBacklightOn` izin istemiyor. `CarSettings time_screen_saver_mode` ≠ 0 ise yerine
+  `com.byd.screensaver/.AudioScreenActivity` (saat ekranı) açılıyor.

@@ -34,12 +34,26 @@ object AppSheet {
     var phone by mutableStateOf(false)
         private set
 
+    /** Ufuk'un hızlı ayarlar kartı (saat/hava kutusundan açılır) açık mı. */
+    var quick by mutableStateOf(false)
+        private set
+
     fun openPhone() {
         app.pano.launcher.system.SidePanel.close()
         page = null
         music = false
         nav = false
+        quick = false
         phone = true
+    }
+
+    fun openQuick() {
+        app.pano.launcher.system.SidePanel.close()
+        page = null
+        music = false
+        nav = false
+        phone = false
+        quick = true
     }
 
     fun open(title: String, url: String) {
@@ -47,6 +61,7 @@ object AppSheet {
         music = false
         nav = false
         phone = false
+        quick = false
         page = Page(title, url)
     }
 
@@ -55,6 +70,7 @@ object AppSheet {
         page = null
         nav = false
         phone = false
+        quick = false
         music = true
     }
 
@@ -63,6 +79,7 @@ object AppSheet {
         page = null
         music = false
         phone = false
+        quick = false
         nav = true
     }
 
@@ -71,6 +88,7 @@ object AppSheet {
         music = false
         nav = false
         phone = false
+        quick = false
     }
 
     /** Panelde açılabilen web uygulamaları (adada sabit durur). */
