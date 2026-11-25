@@ -23,6 +23,7 @@ class AssistantToolsTest {
         override suspend fun weather() = ok("weather")
         override suspend fun volume(action: VolumeAction, percent: Int?, steps: Int) = ok("volume:$action:$percent:$steps")
         override suspend fun location() = ok("location")
+        override suspend fun phoneCall(target: String, confirm: Boolean) = ok("call:$target:$confirm")
         private fun ok(s: String): JSONObject { calls += s; return JSONObject().put("ok", s) }
     }
 
@@ -80,7 +81,17 @@ class AssistantToolsTest {
             assertTrue(r.has("error"))
         }
         val names = (0 until AssistantTools.declarations().length()).map { AssistantTools.declarations().getJSONObject(it).getString("name") }
-        assertEquals(listOf("set_climate", "navigate_to", "stop_navigation", "media_control", "open_app", "vehicle_status", "weather", "set_volume", "current_location"), names)
+        assertEquals(listOf("set_climate", "navigate_to", "stop_navigation", "media_control", "open_app", "vehicle_status", "weather", "set_volume", "phone_call", "current_location"), names)
+    }
+
+    @Test fun phoneCallDefaultsToUnconfirmed() {
+        val (b, _) = call("phone_call", """{"target":"Ahmet"}""")
+        assertEquals(listOf("call:Ahmet:false"), b.calls)
+        val (b2, _) = call("phone_call", """{"target":"0555","confirm":true}""")
+        assertEquals(listOf("call:0555:true"), b2.calls)
+        val (b3, r3) = call("phone_call", """{"target":" "}""")
+        assertTrue(b3.calls.isEmpty())
+        assertTrue(r3.has("error"))
     }
 
     @Test fun appMatcher() {
@@ -96,7 +107,7 @@ class AssistantToolsTest {
         val setup = JSONObject(LiveProtocol.setup("talimat", AssistantTools.declarations(), null)).getJSONObject("setup")
         assertEquals("models/gemini-3.8-live", setup.getString("model"))
         assertEquals("AUDIO", setup.getJSONObject("generationConfig").getJSONArray("responseModalities").getString(0))
-        assertEquals(9, setup.getJSONArray("tools").getJSONObject(0).getJSONArray("functionDeclarations").length())
+        assertEquals(10, setup.getJSONArray("tools").getJSONObject(0).getJSONArray("functionDeclarations").length())
 
         val events = LiveProtocol.parse(
             """{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AAA="}}]},"outputTranscription":{"text":"Tamam"},"turnComplete":true}}""",

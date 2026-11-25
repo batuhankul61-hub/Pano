@@ -76,6 +76,7 @@ object PanoAssistant {
         - "Radyoyu aç" için open_app ile "Radyo" çağır; çalan radyoysa media_control next/previous istasyon değiştirir. Telefon gibi diğer araç uygulamaları için de open_app'i dene; "yapamam" demeden önce bir kez dene.
         - "Yarın / hafta sonu hava" için weather sonucundaki forecast listesini kullan.
         - "Neredeyiz?" için current_location kullan.
+        - "X'i ara / şu numarayı ara" için phone_call kullan: önce confirm=false, kimi arayacağını söyleyip onay iste; yalnızca kullanıcı "evet / ara" derse confirm=true çağır. Onaysız asla arama.
         - Araçlarının kapsamadığı bilgiler (otobüs saatleri, haberler, güncel olaylar) için bilmediğini kısaca söyle.
         - Araç verisi yalnızca araçlardan gelir. Bir değer gelmediyse ya da "preview" true ise bilmediğini söyle; asla tahmin etme ya da uydurma.
         - Kapı kilidi, bagaj, ayna, cam, koltuk gibi fiziksel parçaları hareket ettiremezsin; istenirse bunu kısaca söyle.

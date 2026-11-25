@@ -37,11 +37,16 @@ interface AssistantBackend {
     /** [percent] yalnızca [VolumeAction.Set] için (0–100); [steps] yalnızca Up/Down için kademe sayısı. */
     suspend fun volume(action: VolumeAction, percent: Int?, steps: Int): JSONObject
     suspend fun location(): JSONObject
+    /**
+     * Telefonla arama. [target] kişi adı ya da numara. [confirm] false: yalnızca bulur (kimi arayacağı
+     * döner, arama yapılmaz); true: arar.
+     */
+    suspend fun phoneCall(target: String, confirm: Boolean): JSONObject
 }
 
 /**
- * Modelin çağırabileceği araçlar. Bilerek yalnızca okuma, klima, medya, navigasyon ve uygulama
- * açma var: kilit, bagaj, ayna, cam gibi fiziksel hareket eden hiçbir şey için araç tanımlanmaz.
+ * Modelin çağırabileceği araçlar. Bilerek yalnızca okuma, klima, medya, navigasyon, uygulama açma ve
+ * (onaylı) telefon araması var: kilit, bagaj, ayna, cam gibi fiziksel hareket eden hiçbir şey için araç tanımlanmaz.
  */
 object AssistantTools {
 
@@ -123,6 +128,20 @@ object AssistantTools {
         )
         .put(
             fn(
+                "phone_call",
+                "Telefonla arama yapar (araca bağlı telefon üzerinden). target: kişi adı ya da söylenen numara. " +
+                    "HER ZAMAN önce confirm=false ile çağır: kimi arayacağını bulur, arama YAPMAZ. Sonucu kullanıcıya kısaca söyle " +
+                    "('Ahmet'i arıyorum, onaylıyor musun?') ve onay iste. Kullanıcı açıkça onaylarsa aynı target ile confirm=true çağır. " +
+                    "Birden çok eşleşme dönerse hangisi olduğunu sor; hiç bulunamazsa numarayı söylemesini iste.",
+                props(
+                    "target" to str("Aranacak kişinin adı ya da numara (rakamlarla)."),
+                    "confirm" to bool("false: yalnızca bul ve onay iste (varsayılan). true: kullanıcı onayladı, ara."),
+                ),
+                required = listOf("target"),
+            ),
+        )
+        .put(
+            fn(
                 "current_location",
                 "Aracın şu anki konumunu okur: yakındaki yer ya da sokak adı, semt ve şehir. 'Neredeyiz?' gibi sorular için.",
                 props(),
@@ -187,6 +206,11 @@ object AssistantTools {
                 backend.volume(action, percent, steps)
             }
             "current_location" -> backend.location()
+            "phone_call" -> {
+                val target = a.optString("target").trim()
+                if (target.isEmpty()) error("Aranacak kişi ya da numara verilmedi.")
+                backend.phoneCall(target, a.optBoolOrNull("confirm") ?: false)
+            }
             else -> error("Böyle bir araç yok: ${call.name}")
         }
     } catch (e: kotlinx.coroutines.CancellationException) {

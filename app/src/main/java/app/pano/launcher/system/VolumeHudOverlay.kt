@@ -35,6 +35,9 @@ import app.pano.launcher.ui.theme.PanoTheme
  * yerine Ufuk'ta ses değişince erişilebilirlik hizmetinin pencere katmanında (sistemin ses barından
  * daha üstte) kendi barını tam onun yerine açar, BYD barı altında kalır.
  *
+ * BYD barı gibi iki sürgü gösterir: Medya (müzik; radyo / Bluetooth müzik çalarken BYD'nin kendi
+ * kanalları, aramada arama sesi) ve Navigasyon (BYD `STREAM_NAVI` = 14, BYD barında "Yayın").
+ *
  * Barın yeri araçta ölçüldü (1280×720, firmware 13.1.33): [24,210]–[256,528]. Ekran farklıysa oranla
  * ölçeklenir. Pano'nun kendi +/- düğmeleri sistem barını açmıyor; onların değişikliği burada
  * gösterilmez ([markOwnChange]).
@@ -44,16 +47,38 @@ object VolumeHudOverlay {
     private val BYD_BAR = Rect(24, 210, 256, 528)
     private const val REF_W = 1280f
     private const val REF_H = 720f
-    /** BYD barını kenarlarıyla birlikte örtmek için taşma (piksel, 720p'de). */
-    private const val MARGIN = 20
+    /**
+     * BYD barını gölgesiyle örtmek için taşma (piksel, 720p'de). Yanlarda gölge görünüyordu (20);
+     * üstte ve altta az (6): üstte hız göstergesi, altta müzik kartı var.
+     */
+    private const val MARGIN_X = 20
+    private const val MARGIN_Y = 6
     /** Son değişiklikten sonra açık kalma süresi; BYD barı bu sürede kapanmış oluyor. */
     private const val SHOW_MS = 6000L
+    /** Kapanış animasyonu (SideVolumeHud ile aynı). */
+    const val EXIT_MS = 180L
 
-    val level = mutableIntStateOf(0)
-    val max = mutableIntStateOf(1)
-    val muted = mutableStateOf(false)
-    /** Gösterilen ses akışı (müzik; aramada arama sesi). */
-    @Volatile private var stream = AudioManager.STREAM_MUSIC
+    /** BYD'nin ek ses kanalları (android.media.AudioManager, gizli): FM 11, AUX 12, BT müzik 13, navigasyon 14. */
+    const val STREAM_NAVI = 14
+    private val MEDIA_STREAMS = setOf(AudioManager.STREAM_MUSIC, 11, 12, 13)
+
+    /** Bir sürgünün durumu. */
+    class Slider(val label: String) {
+        val stream = mutableIntStateOf(AudioManager.STREAM_MUSIC)
+        val level = mutableIntStateOf(0)
+        val max = mutableIntStateOf(1)
+        val muted = mutableStateOf(false)
+        val title = mutableStateOf(label)
+    }
+
+    val media = Slider("Medya")
+    val navi = Slider("Navigasyon").also { it.stream.intValue = STREAM_NAVI }
+    /** Son değişen sürgü navigasyon mu (vurgulanır). */
+    val naviActive = mutableStateOf(false)
+    /** Pano önde: bar sol sütunun bir parçası gibi çizilir (kart yok). */
+    val onPano = mutableStateOf(false)
+    /** Görünür mü (açılış / kapanış animasyonu bunu izler). */
+    val visible = mutableStateOf(false)
 
     private var service: AccessibilityService? = null
     private var receiver: BroadcastReceiver? = null
@@ -61,6 +86,7 @@ object VolumeHudOverlay {
     private var owner: Owner? = null
     private val handler = Handler(Looper.getMainLooper())
     private val hideRunnable = Runnable { hide() }
+    private val removeRunnable = Runnable { removeWindow() }
     @Volatile private var ownChangeAt = 0L
     /** Kullanıcı bara dokunurken kapanmasın. */
     @Volatile var touching = false
@@ -86,38 +112,59 @@ object VolumeHudOverlay {
     fun detach() {
         receiver?.let { r -> runCatching { service?.unregisterReceiver(r) } }
         receiver = null
-        hide()
+        removeWindow()
         service = null
     }
+
+    private fun audio(): AudioManager? = service?.getSystemService(AudioManager::class.java)
+
+    private fun inCall(a: AudioManager) =
+        a.mode == AudioManager.MODE_IN_CALL || a.mode == AudioManager.MODE_IN_COMMUNICATION
 
     private fun onVolumeChanged(type: Int) {
         if (PanoSettings.state.value.layout != LayoutStyle.Ufuk) return
         if (SystemClock.uptimeMillis() - ownChangeAt < 800) return
-        val audio = service?.getSystemService(AudioManager::class.java) ?: return
-        // Aramada arama sesi, yoksa müzik gösterilir (BYD de böyle değiştiriyor).
-        val inCall = audio.mode == AudioManager.MODE_IN_CALL || audio.mode == AudioManager.MODE_IN_COMMUNICATION
-        val wanted = if (inCall) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
-        if (type != -1 && type != wanted) return
-        stream = wanted
-        refresh(audio)
+        val a = audio() ?: return
+        val call = inCall(a)
+        when {
+            type == STREAM_NAVI -> naviActive.value = true
+            call && type == AudioManager.STREAM_VOICE_CALL -> {
+                media.stream.intValue = AudioManager.STREAM_VOICE_CALL
+                naviActive.value = false
+            }
+            !call && type in MEDIA_STREAMS -> {
+                media.stream.intValue = type
+                naviActive.value = false
+            }
+            else -> return
+        }
+        media.title.value = if (media.stream.intValue == AudioManager.STREAM_VOICE_CALL) "Arama" else "Medya"
+        refresh(a)
         show()
     }
 
-    private fun refresh(audio: AudioManager) {
-        max.intValue = audio.getStreamMaxVolume(stream).coerceAtLeast(1)
-        level.intValue = audio.getStreamVolume(stream)
-        muted.value = audio.isStreamMute(stream)
+    private fun refresh(a: AudioManager) {
+        for (s in listOf(media, navi)) {
+            val st = s.stream.intValue
+            runCatching {
+                s.max.intValue = a.getStreamMaxVolume(st).coerceAtLeast(1)
+                s.level.intValue = a.getStreamVolume(st)
+                s.muted.value = a.isStreamMute(st)
+            }
+        }
     }
 
-    /** Bardan sürükleyerek ses ayarı. */
-    fun set(value: Int) {
-        val audio = service?.getSystemService(AudioManager::class.java) ?: return
+    /** Sürgüden ses ayarı. */
+    fun set(slider: Slider, value: Int) {
+        val a = audio() ?: return
         markOwnChange()
+        val st = slider.stream.intValue
         runCatching {
-            if (muted.value && value > 0) audio.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
-            audio.setStreamVolume(stream, value.coerceIn(0, max.intValue), 0)
-        }
-        refresh(audio)
+            if (slider.muted.value && value > 0) a.adjustStreamVolume(st, AudioManager.ADJUST_UNMUTE, 0)
+            a.setStreamVolume(st, value.coerceIn(0, slider.max.intValue), 0)
+        }.onFailure { Log.w(TAG, "ses ayarlanamadı ($st): $it") }
+        naviActive.value = slider === navi
+        refresh(a)
         scheduleHide()
     }
 
@@ -132,14 +179,17 @@ object VolumeHudOverlay {
         val sx = m.widthPixels / REF_W
         val sy = m.heightPixels / REF_H
         return Rect(
-            ((BYD_BAR.left - MARGIN) * sx).toInt(), ((BYD_BAR.top - MARGIN) * sy).toInt(),
-            ((BYD_BAR.right + MARGIN) * sx).toInt(), ((BYD_BAR.bottom + MARGIN) * sy).toInt(),
+            ((BYD_BAR.left - MARGIN_X) * sx).toInt(), ((BYD_BAR.top - MARGIN_Y) * sy).toInt(),
+            ((BYD_BAR.right + MARGIN_X) * sx).toInt(), ((BYD_BAR.bottom + MARGIN_Y) * sy).toInt(),
         )
     }
 
     private fun show() {
         val s = service ?: return
         scheduleHide()
+        handler.removeCallbacks(removeRunnable)
+        onPano.value = ForegroundApp.pkg.value == s.packageName
+        visible.value = true
         if (view != null) return
         val wm = s.getSystemService(WindowManager::class.java) ?: return
         val b = bounds(s)
@@ -167,9 +217,19 @@ object VolumeHudOverlay {
             .onFailure { Log.w(TAG, "ses barı açılamadı: $it"); o.destroy() }
     }
 
+    /** Kapanış animasyonu oynar, sonra pencere kalkar. */
     fun hide() {
         if (touching) { scheduleHide(); return }
         handler.removeCallbacks(hideRunnable)
+        if (view == null) return
+        visible.value = false
+        handler.postDelayed(removeRunnable, EXIT_MS + 40)
+    }
+
+    private fun removeWindow() {
+        handler.removeCallbacks(hideRunnable)
+        handler.removeCallbacks(removeRunnable)
+        visible.value = false
         val v = view ?: return
         view = null
         runCatching { service?.getSystemService(WindowManager::class.java)?.removeViewImmediate(v) }

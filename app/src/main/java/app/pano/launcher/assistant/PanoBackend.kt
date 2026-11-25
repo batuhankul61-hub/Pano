@@ -277,6 +277,63 @@ class PanoBackend(private val context: Context) : AssistantBackend {
         if (ageMin > 10) o.put("warning", "Konum $ageMin dakika önceye ait; araç o zamandan beri yer değiştirmiş olabilir.")
         return o
     }
+
+    // ---- Telefon -------------------------------------------------------------
+
+    /** Aranacak kişi: [number] Pano'da kalır, modele yalnızca ad ve son iki hane gider. */
+    private data class Callee(val name: String?, val number: String)
+
+    private fun fold(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase(turkish), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "").replace('ı', 'i')
+
+    /** Söylenen numara ya da ad için adaylar: rehber + son aramalardaki adlar. */
+    private suspend fun findCallees(target: String): List<Callee> {
+        val digits = target.filter { it.isDigit() }
+        if (digits.length >= 3 && digits.length >= target.count { it.isLetter() }) {
+            return listOf(Callee(null, (if (target.trim().startsWith("+")) "+" else "") + digits))
+        }
+        val q = fold(target.trim())
+        if (q.isEmpty()) return emptyList()
+        val contacts = app.pano.launcher.phone.PhoneBook.contacts(context).map { Callee(it.name, it.number) }
+        val recents = app.pano.launcher.phone.PhoneBook.recents(context, 200)
+            .mapNotNull { r -> r.name?.let { Callee(it, r.number) } }
+        val all = (contacts + recents).distinctBy { app.pano.launcher.phone.PhoneBook.digits(it.number) }
+        // Önce tam ad, sonra ad içinde geçen.
+        val exact = all.filter { it.name != null && fold(it.name) == q }
+        return exact.ifEmpty { all.filter { it.name != null && fold(it.name).contains(q) } }.take(5)
+    }
+
+    private fun Callee.describe(): JSONObject = JSONObject().apply {
+        name?.let { put("name", it) }
+        put("number_ends_with", number.filter { it.isDigit() }.takeLast(2))
+    }
+
+    override suspend fun phoneCall(target: String, confirm: Boolean): JSONObject {
+        val found = findCallees(target)
+        if (found.isEmpty()) {
+            val canRead = app.pano.launcher.phone.PhoneBook.canReadContacts(context) &&
+                app.pano.launcher.phone.PhoneBook.canReadCalls(context)
+            return JSONObject().put(
+                "error",
+                if (!canRead) "Rehbere erişim izni yok; kullanıcıdan numarayı söylemesini iste."
+                else "'$target' rehberde ya da son aramalarda bulunamadı; numarayı söylemesini iste.",
+            )
+        }
+        if (found.size > 1) {
+            return JSONObject().put("matches", JSONArray(found.map { it.describe() }))
+                .put("note", "Birden çok kişi bulundu; hangisi olduğunu sor, sonra tam adıyla yeniden çağır.")
+        }
+        val callee = found.single()
+        if (!confirm) {
+            return JSONObject().put("callee", callee.describe()).put("needs_confirmation", true)
+                .put("note", "Arama yapılmadı. Kimi arayacağını söyle ve onay iste.")
+        }
+        withContext(Dispatchers.Main) { app.pano.launcher.phone.PhoneCall.call(context, callee.number) }
+        return JSONObject().put("calling", callee.describe())
+            .put("direct", app.pano.launcher.phone.PhoneCall.canCallDirectly(context))
+    }
+
 }
 
 /** Söylenen adı yüklü uygulama etiketleriyle eşler ("spotify'ı aç" → "Spotify"). */
@@ -306,4 +363,5 @@ object AppMatcher {
             if (score > 0) app to (score * 100 - l.length) else null
         }.maxByOrNull { it.second }?.first
     }
+
 }
