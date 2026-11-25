@@ -106,11 +106,14 @@ class PanoAccessibility : AccessibilityService() {
         Log.i("SystemActions", "erişilebilirlik hizmeti bağlandı")
         // Direksiyondan ses değişince aracın ses barı yerine Pano'nunki.
         VolumeHudOverlay.attach(this)
+        // Görüşmede BYD'nin arama penceresi yerine Pano'nun kartı.
+        CallOverlay.attach(this)
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         instance = null
         VolumeHudOverlay.detach()
+        CallOverlay.detach()
         return super.onUnbind(intent)
     }
 
@@ -122,6 +125,7 @@ class PanoAccessibility : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             ForegroundApp.onWindowChanged(this, event.packageName?.toString(), event.className?.toString())
+            CallOverlay.onWindowChanged(event.packageName?.toString(), event.className?.toString())
         }
     }
     override fun onInterrupt() {}

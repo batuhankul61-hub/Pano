@@ -30,14 +30,15 @@ object ForegroundApp {
     /** Erişilebilirlik olayından çağrılır. */
     fun onWindowChanged(context: Context, pkg: String?, cls: String?) {
         if (pkg.isNullOrBlank() || cls.isNullOrBlank()) return
-        val key = "$pkg/$cls"
-        val isActivity = activityCache.getOrPut(key) {
-            runCatching { context.packageManager.getActivityInfo(ComponentName(pkg, cls), 0) }.isSuccess
-        }
-        if (isActivity && _pkg.value != pkg) {
+        if (isActivity(context, pkg, cls) && _pkg.value != pkg) {
             _pkg.value = pkg
             Log.d(TAG, "önde: $pkg")
         }
+    }
+
+    /** Pencere bir etkinliğe (Activity) mi ait; diyalog, katman vb. değil. */
+    fun isActivity(context: Context, pkg: String, cls: String): Boolean = activityCache.getOrPut("$pkg/$cls") {
+        runCatching { context.packageManager.getActivityInfo(ComponentName(pkg, cls), 0) }.isSuccess
     }
 
     /**

@@ -86,8 +86,8 @@ fun PhoneScreen(modifier: Modifier = Modifier) {
         pendingCall = null
     }
     val call: (String) -> Unit = { n ->
-        if (PhoneCall.canCallDirectly(context) && PhoneCall.canFindLine(context)) PhoneCall.call(context, n)
-        else { pendingCall = n; askCall.launch(arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE)) }
+        if (PhoneCall.canCallDirectly(context) && PhoneCall.canFindLine(context) && app.pano.launcher.phone.CallHub.canAnswerCalls(context)) PhoneCall.call(context, n)
+        else { pendingCall = n; askCall.launch(arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE, Manifest.permission.ANSWER_PHONE_CALLS)) }
     }
 
     // Tuş takımına yazılınca liste numarayla eşleşen kişilere daralır.
