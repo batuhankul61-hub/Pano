@@ -153,6 +153,12 @@ object PanoAssistant {
      */
     fun start(context: Context) {
         if (isActive) return
+        // Telefon görüşmesi sırasında asistan açılmaz: mikrofon ve hoparlör görüşmenin.
+        if (inCall(context)) {
+            _ui.value = AssistantUi(AssistantPhase.Error, error = "Arama sırasında asistan kullanılamaz.")
+            scope.launch { delay(3_000); if (_ui.value.phase == AssistantPhase.Error) stop() }
+            return
+        }
         // Önce "bağlanıyor" görünür; Keystore araçta yavaş olabildiği için anahtar arka planda çözülür.
         _ui.value = AssistantUi(AssistantPhase.Connecting)
         val gen = ++generation
@@ -171,7 +177,19 @@ object PanoAssistant {
         }
     }
 
+    /** Telefon görüşmesi var mı (telefonun Bluetooth hattı da dahil; Telecom). */
+    fun inCall(context: Context): Boolean {
+        val telecom = context.getSystemService(android.telecom.TelecomManager::class.java)
+        val byTelecom = runCatching { telecom?.isInCall == true }.getOrDefault(false)
+        val mode = context.getSystemService(android.media.AudioManager::class.java)?.mode
+        return byTelecom || mode == android.media.AudioManager.MODE_IN_CALL || mode == android.media.AudioManager.MODE_IN_COMMUNICATION
+    }
+
+    private var appContext: Context? = null
+    private var lastCallCheck = 0L
+
     private fun begin(context: Context, key: String) {
+        appContext = context.applicationContext
         ConversationLog.init(context)
         ConversationLog.sessionStarted()
         sessionLogged = true
@@ -525,6 +543,14 @@ object PanoAssistant {
         val now = SystemClock.uptimeMillis()
         val ui = _ui.value
         if (now - startedAt > MAX_SESSION_MS) { stop("10 dakika sınırı"); return }
+        // Arama başladıysa (asistanla ya da başka yoldan) oturum kapanır; konuşuyorsa cümlesini bitirir.
+        if (now - lastCallCheck > 700) {
+            lastCallCheck = now
+            val ctx = appContext
+            if (ctx != null && inCall(ctx) && (ui.phase != AssistantPhase.Speaking || speaker?.isPlaying != true)) {
+                stop("arama başladı"); return
+            }
+        }
         checkNoReply(now)
         when (ui.phase) {
             AssistantPhase.Speaking -> if (speaker?.isPlaying != true) {
