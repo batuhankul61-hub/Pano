@@ -1,5 +1,6 @@
 package app.pano.launcher.assistant
 
+import app.pano.launcher.navigation.Shortcut
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -16,6 +17,7 @@ class AssistantToolsTest {
         var climate: ClimateChange? = null
         override suspend fun climate(change: ClimateChange) = ok("climate").also { climate = change }
         override suspend fun navigateTo(query: String, start: Boolean) = ok("nav:$query:$start")
+        override suspend fun navigateToSaved(shortcut: Shortcut, start: Boolean) = ok("saved:$shortcut:$start")
         override suspend fun stopNavigation() = ok("stopNav")
         override suspend fun media(action: MediaAction) = ok("media:$action")
         override suspend fun openApp(name: String) = ok("app:$name")
@@ -45,9 +47,25 @@ class AssistantToolsTest {
 
     @Test fun navigationDefaultsToStart() {
         assertEquals(listOf("nav:Kadıköy:true"), call("navigate_to", """{"destination":" Kadıköy "}""").first.calls)
-        assertEquals(listOf("nav:Ev:false"), call("navigate_to", """{"destination":"Ev","start":false}""").first.calls)
+        assertEquals(listOf("nav:Ev Kadıköy:false"), call("navigate_to", """{"destination":"Ev Kadıköy","start":false}""").first.calls)
         assertTrue(call("navigate_to", """{"destination":""}""").second.has("error"))
         assertEquals(listOf("stopNav"), call("stop_navigation").first.calls)
+    }
+
+    @Test fun homeAndWorkUseSavedPlaces() {
+        assertEquals(listOf("saved:Home:false"), call("navigate_to", """{"destination":"Ev","start":false}""").first.calls)
+        assertEquals(listOf("saved:Home:true"), call("navigate_to", """{"destination":"evime git"}""").first.calls)
+        assertEquals(listOf("saved:Work:true"), call("navigate_to", """{"destination":"İŞE"}""").first.calls)
+        assertEquals(listOf("saved:Work:true"), call("navigate_to", """{"destination":"iş yerime."}""").first.calls)
+        assertEquals(listOf("saved:Work:true"), call("navigate_to", """{"destination":"ofis"}""").first.calls)
+    }
+
+    @Test fun savedShortcutOnlyForWholeWord() {
+        assertEquals(Shortcut.Home, AssistantTools.savedShortcut("Eve"))
+        assertEquals(Shortcut.Work, AssistantTools.savedShortcut("işyerim"))
+        assertNull(AssistantTools.savedShortcut("Evka 3"))
+        assertNull(AssistantTools.savedShortcut("İş Bankası"))
+        assertNull(AssistantTools.savedShortcut("en yakın benzinlik"))
     }
 
     @Test fun mediaActions() {

@@ -1,7 +1,9 @@
 package app.pano.launcher.assistant
 
+import app.pano.launcher.navigation.Shortcut
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 /** Klima isteği; null alan = değiştirme. */
 data class ClimateChange(
@@ -29,6 +31,8 @@ enum class VolumeAction { Up, Down, Set, Mute, Unmute, Status }
 interface AssistantBackend {
     suspend fun climate(change: ClimateChange): JSONObject
     suspend fun navigateTo(query: String, start: Boolean): JSONObject
+    /** Kullanıcının "Nereye?" kartında kaydettiği Ev / İş adresine rota. */
+    suspend fun navigateToSaved(shortcut: Shortcut, start: Boolean): JSONObject
     suspend fun stopNavigation(): JSONObject
     suspend fun media(action: MediaAction): JSONObject
     suspend fun openApp(name: String): JSONObject
@@ -70,9 +74,10 @@ object AssistantTools {
         .put(
             fn(
                 "navigate_to",
-                "Bir yere Pano'nun kendi navigasyonuyla rota oluşturur. Yer adı, adres ya da 'en yakın benzinlik' gibi bir arama olabilir.",
+                "Bir yere Pano'nun kendi navigasyonuyla rota oluşturur. Yer adı, adres ya da 'en yakın benzinlik' gibi bir arama olabilir. " +
+                    "'Eve git' / 'işe git' için destination 'ev' ya da 'iş' olsun: kullanıcının kaydettiği adres kullanılır.",
                 props(
-                    "destination" to str("Gidilecek yer, kullanıcının söylediği gibi."),
+                    "destination" to str("Gidilecek yer, kullanıcının söylediği gibi. Kayıtlı ev için 'ev', iş yeri için 'iş'."),
                     "start" to bool("true: rotayı hemen başlat (varsayılan). false: yalnızca önizle."),
                 ),
                 required = listOf("destination"),
@@ -148,6 +153,29 @@ object AssistantTools {
             ),
         )
 
+    private val turkish = Locale.forLanguageTag("tr-TR")
+    private val HOME_WORDS = setOf("ev", "eve", "evim", "evime", "evimize", "ev adresi", "ev adresim", "home")
+    private val WORK_WORDS = setOf(
+        "iş", "işe", "işim", "işime", "iş yeri", "iş yerim", "iş yerime", "işyeri", "işyerim", "işyerime",
+        "ofis", "ofise", "ofisim", "ofisime", "work",
+    )
+
+    /**
+     * Hedef yalnızca "ev" / "iş" (ve çekimleri) ise kayıtlı kısayol. "Ev Kadıköy" ya da "Evka 3" gibi
+     * başka bir yer adı aranır. Sondaki "git / gidelim / götür" atılır.
+     */
+    internal fun savedShortcut(destination: String): Shortcut? {
+        val t = destination.lowercase(turkish)
+            .replace(Regex("""[^\p{L}\p{N} ]"""), " ")
+            .replace(Regex("""\s+"""), " ").trim()
+            .replace(Regex("""\s(git|gidelim|gidiyoruz|götür|dön|dönelim)$"""), "")
+        return when (t) {
+            in HOME_WORDS -> Shortcut.Home
+            in WORK_WORDS -> Shortcut.Work
+            else -> null
+        }
+    }
+
     /** Tek bir araç çağrısını çalıştırır; hata olursa modelin anlayacağı bir `error` döner. */
     suspend fun run(call: ToolCall, backend: AssistantBackend): JSONObject = try {
         val a = call.args
@@ -169,7 +197,9 @@ object AssistantTools {
             "navigate_to" -> {
                 val dest = a.optString("destination").trim()
                 if (dest.isEmpty()) error("Hedef belirtilmedi.")
-                backend.navigateTo(dest, a.optBoolOrNull("start") ?: true)
+                val start = a.optBoolOrNull("start") ?: true
+                val saved = savedShortcut(dest)
+                if (saved != null) backend.navigateToSaved(saved, start) else backend.navigateTo(dest, start)
             }
             "stop_navigation" -> backend.stopNavigation()
             "media_control" -> {
