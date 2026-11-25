@@ -154,6 +154,41 @@ internal object BydBus {
             .also { Log.i(TAG, "yazma $fields=${values.toList()} → $it") }
     }
 
+    /**
+     * Bir gruptaki tüm sinyal kimlikleri (`BYDAutoFeatureIds$<Grup>` statik int alanları), ad → kimlik.
+     * Adı kesin bilinmeyen sinyalleri (şarj gibi) çalışma anında bulmak için. BYD değilse boş.
+     */
+    fun groupFields(group: String): Map<String, Int> = runCatching {
+        Class.forName("android.hardware.bydauto.BYDAutoFeatureIds\$$group").fields
+            .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.type == Int::class.javaPrimitiveType }
+            .associate { it.name to it.getInt(null) }
+    }.getOrDefault(emptyMap())
+
+    /** Bir cihaz sınıfının tüm statik int sabitleri (değer anlamlarını adlarından çözmek için). */
+    fun deviceConstants(deviceClass: String): Map<String, Int> = runCatching {
+        Class.forName("android.hardware.bydauto.$deviceClass").fields
+            .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.type == Int::class.javaPrimitiveType }
+            .associate { it.name to it.getInt(null) }
+    }.getOrDefault(emptyMap())
+
+    /**
+     * Kimlikle okuma: önce genel türle (0), gelmezse verilen cihaz türüyle. "Yok" işaretleri null.
+     */
+    fun readId(featureId: Int, deviceType: Int): Int? {
+        val target = manager ?: return null
+        fun at(type: Int) = runCatching { getInt?.invoke(target, type, featureId) as? Int }.getOrNull()
+            ?.takeIf { it != UNAVAILABLE && it != NOT_FITTED && it > -2147482700 }
+        return at(DEVICE_ANY) ?: at(deviceType)
+    }
+
+    /** Kimlikle ondalık okuma (bazı ölçümler yalnız `getDouble` ile anlamlı geliyor). */
+    fun readDoubleId(featureId: Int, deviceType: Int): Double? {
+        val target = manager ?: return null
+        fun at(type: Int) = runCatching { getDouble?.invoke(target, type, featureId) as? Double }.getOrNull()
+            ?.takeIf { !it.isNaN() && it != UNAVAILABLE.toDouble() && it > -1e6 }
+        return at(DEVICE_ANY) ?: at(deviceType)
+    }
+
     /** Cihaz sınıflarında tanımlı sabit (örn. vites kodları). */
     fun deviceConstant(deviceClass: String, field: String): Int? = runCatching {
         Class.forName("android.hardware.bydauto.$deviceClass").getField(field).getInt(null)

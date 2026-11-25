@@ -96,6 +96,7 @@ import app.pano.launcher.ui.theme.LocalPano
 import app.pano.launcher.ui.theme.PanoColors
 import app.pano.launcher.ui.theme.activeColor
 import app.pano.launcher.ui.theme.onActiveColor
+import app.pano.launcher.vehicle.ChargeState
 import app.pano.launcher.vehicle.ClimateState
 import app.pano.launcher.vehicle.Gear
 import app.pano.launcher.vehicle.Opening
@@ -236,6 +237,8 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
     val v by VehicleHub.state.collectAsState()
     val driving by VehicleHub.isDriving.collectAsState()
     val locked = ufukDrivingLocked()
+    // Sürüşte şarj görünümü hiç açılmaz (hatalı bir sinyal hızı gizlemesin).
+    val charge = v.charge?.takeIf { it.isActive && !driving }
 
     Column(modifier.background(c.card).padding(start = 36.dp, end = 32.dp, top = 28.dp, bottom = 20.dp)) {
         // Vites: hepsi görünür, etkin olan beyaz. Bilinmiyorsa hiçbiri vurgulanmaz (uydurma "P" yok).
@@ -250,9 +253,14 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
                 }
             }
             Spacer(Modifier.weight(1f))
-            BatteryReadout(v.batteryPercent, v.rangeKm, c)
+            // Şarjda yüzde aşağıda büyük yazar; burada yalnızca menzil kalır (bilgi tek yerde).
+            BatteryReadout(v.batteryPercent, v.rangeKm, c, showPercent = charge == null)
         }
 
+        // Şarjda (park halinde) hızın yerini şarj görünümü alır; kablo çıkınca/şarj bitince hız geri gelir.
+        if (charge != null) {
+            ChargingReadout(charge, v.batteryPercent, Modifier.padding(top = 18.dp, bottom = 14.dp))
+        } else
         // Hız: sütunun en büyük öğesi. Bilinmiyorsa "—".
         Row(Modifier.fillMaxWidth().padding(top = 18.dp)) {
             // Hız bilinmiyorsa kısa, soluk bir çizgi (uydurma 0 yok).
@@ -319,13 +327,13 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
 }
 
 @Composable
-private fun BatteryReadout(percent: Int?, rangeKm: Int?, c: PanoColors) {
+private fun BatteryReadout(percent: Int?, rangeKm: Int?, c: PanoColors, showPercent: Boolean = true) {
     Column(horizontalAlignment = Alignment.End) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(rangeKm?.toString() ?: "—", color = c.text, fontSize = 34.sp, fontWeight = FontWeight.Medium, lineHeight = 34.sp)
             Text("km", color = c.secondary, fontSize = 20.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(start = 4.dp, bottom = 3.dp))
         }
-        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (showPercent) Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.width(64.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(c.raised)) {
                 val p = (percent ?: 0).coerceIn(0, 100) / 100f
                 Box(
@@ -338,6 +346,86 @@ private fun BatteryReadout(percent: Int?, rangeKm: Int?, c: PanoColors) {
                 modifier = Modifier.padding(start = 10.dp),
             )
         }
+    }
+}
+
+/**
+ * Şarj görünümü: durum satırı (şimşek + "Şarj oluyor" + AC/DC), büyük yüzde, hedef işaretli
+ * ilerleme çubuğu ve bilinen ölçümler (güç, kalan süre, hedef). Bilinmeyen ölçüm yazılmaz.
+ * Renk yalnızca durum anlatır: şarj ederken yeşil, bitince/beklerken nötr. Önizlemede ayrı etiket
+ * yok; sütunun başındaki "Önizleme" yeterli (Ufuk ilkesi: tek yerde).
+ */
+@Composable
+private fun ChargingReadout(charge: ChargeState, percent: Int?, modifier: Modifier = Modifier) {
+    val c = LocalPano.current
+    val flowing = charge.charging == true || (charge.charging == null && (charge.powerKw ?: 0f) >= ChargeState.MIN_ACTIVE_KW)
+    val tone = if (flowing) Accent.Green else c.secondary
+    val title = when {
+        charge.finished == true -> "Şarj tamamlandı"
+        flowing -> "Şarj oluyor"
+        else -> "Şarj kablosu takılı"
+    }
+    Column(modifier.fillMaxWidth().semantics { contentDescription = "$title, yüzde ${percent ?: "bilinmiyor"}" }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(PanoIcons.Bolt, contentDescription = null, tint = tone, modifier = Modifier.size(26.dp))
+            Text(
+                title, color = c.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+            charge.kind?.let {
+                Text(
+                    it.name, color = c.secondary, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 12.dp).clip(RoundedCornerShape(8.dp)).background(c.raised)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+        }
+        Row(Modifier.padding(top = 4.dp)) {
+            Text(
+                percent?.toString() ?: "–", color = if (percent == null) c.tertiary else c.text, fontSize = 112.sp,
+                fontWeight = FontWeight.Light, letterSpacing = (-4).sp, lineHeight = 112.sp,
+                modifier = Modifier.alignByBaseline(),
+            )
+            Text(
+                "%", color = c.secondary, fontSize = 34.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.alignByBaseline().padding(start = 6.dp),
+            )
+        }
+        // İlerleme: dolu kısım şu anki yüzde, ince çizgi hedef.
+        val target = charge.targetPercent
+        BoxWithConstraints(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(c.raised)) {
+            val p = (percent ?: 0).coerceIn(0, 100) / 100f
+            Box(Modifier.fillMaxHeight().fillMaxWidth(p).clip(RoundedCornerShape(7.dp)).background(if (flowing) Accent.Green else c.text))
+            if (target != null && target < 100) {
+                Box(Modifier.offset(x = maxWidth * (target / 100f) - 1.5.dp).width(3.dp).fillMaxHeight().background(c.text.copy(alpha = 0.6f)))
+            }
+        }
+        val stats = listOfNotNull(
+            charge.powerKw?.takeIf { flowing }?.let { "Güç" to "${decimal(it)} kW" },
+            charge.remainingMin?.takeIf { flowing && it > 0 }?.let { "Kalan" to durationText(it) },
+            target?.let { "Hedef" to "%$it" },
+        )
+        if (stats.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                stats.forEach { (label, value) ->
+                    Column {
+                        Text(label, color = c.secondary, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        Text(value, color = c.text, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, style = tabular())
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 869 → "14 sa 29 dk", 45 → "45 dk". */
+internal fun durationText(minutes: Int): String {
+    val h = minutes / 60
+    val m = minutes % 60
+    return when {
+        h == 0 -> "$m dk"
+        m == 0 -> "$h sa"
+        else -> "$h sa $m dk"
     }
 }
 
