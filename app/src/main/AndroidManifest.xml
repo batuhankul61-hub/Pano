@@ -33,6 +33,9 @@
     <uses-permission android:name="android.permission.CALL_COMPANION_APP" />
     <!-- Uygulama içi güncelleme: GitHub'dan indirilen yeni sürümü kurmak için (kullanıcı onaylar) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Hızlı ayarlar: Bluetooth ve Wi-Fi durumunu göstermek için (araç Android 10). -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Sistem çubuklarını tüm uygulamalarda gizlemek için; yalnızca adb ile verilebilir (pm grant) -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
@@ -54,6 +57,13 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.APP_MUSIC" />
+        </intent>
+        <!-- Hızlı ayarlar: Android'in Bluetooth / Wi-Fi ayar ekranı var mı (yoksa düğme çizilmez). -->
+        <intent>
+            <action android:name="android.settings.BLUETOOTH_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.WIFI_SETTINGS" />
         </intent>
         <!-- BYD araçta modelin kendi görseli bu eklentiden okunur. -->
         <package android:name="com.byd.carsettings.plugins" />

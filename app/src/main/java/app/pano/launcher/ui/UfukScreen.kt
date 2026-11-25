@@ -154,7 +154,7 @@ private fun ufukDrivingLocked(): Boolean {
 }
 
 /** Haritanın üstünde açılan kart. */
-private enum class UfukPanel { Climate, Apps, Settings, Music, Nav, Phone }
+private enum class UfukPanel { Climate, Apps, Settings, Music, Nav, Phone, Quick }
 
 @Composable
 fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit) {
@@ -166,11 +166,12 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
         AppSheet.nav -> UfukPanel.Nav
         AppSheet.music -> UfukPanel.Music
         AppSheet.phone -> UfukPanel.Phone
+        AppSheet.quick -> UfukPanel.Quick
         else -> null
     }
     // Aynı anda tek kart: yerel ekran açılınca müzik / nereye kapanır; onlar açılınca ekran ana sayfaya döner.
     LaunchedEffect(screen) { if (screen != Screen.Home) AppSheet.close() }
-    val sheetOpen = AppSheet.nav || AppSheet.music || AppSheet.phone
+    val sheetOpen = AppSheet.nav || AppSheet.music || AppSheet.phone || AppSheet.quick
     LaunchedEffect(sheetOpen) { if (sheetOpen && screen != Screen.Home) onNavigate(Screen.Home) }
 
     val volume = rememberUfukVolume()
@@ -631,9 +632,15 @@ private fun ClockWeather(modifier: Modifier) {
         while (true) { value = System.currentTimeMillis(); delay(1_000) }
     }
     val weather by WeatherHub.state.collectAsState()
+    val open = AppSheet.quick
+    // Dokununca hızlı ayarlar (parlaklık, tema, bağlantılar, koltuk) açılır / kapanır.
     Row(
-        modifier.height(72.dp).clip(RoundedCornerShape(36.dp)).background(c.glass)
-            .border(1.dp, c.hairline, RoundedCornerShape(36.dp)).padding(horizontal = 26.dp),
+        modifier.height(72.dp).clip(RoundedCornerShape(36.dp)).background(if (open) c.card else c.glass)
+            .border(1.dp, c.hairline, RoundedCornerShape(36.dp))
+            .clickable(role = Role.Button, onClickLabel = if (open) "Hızlı ayarları kapat" else "Hızlı ayarlar") {
+                if (open) AppSheet.close() else AppSheet.openQuick()
+            }
+            .padding(horizontal = 26.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(SimpleDateFormat("HH:mm", trLocale).format(Date(now)), color = c.text, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
@@ -642,6 +649,8 @@ private fun ClockWeather(modifier: Modifier) {
             Text("${Math.round(w.temperatureC)}°", color = c.text, fontSize = 26.sp, fontWeight = FontWeight.Medium)
             Text(w.description, color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(start = 10.dp))
         }
+        // Kutunun açılabildiğini belli eden küçük ok.
+        Icon(PanoIcons.ChevronDown, contentDescription = null, tint = c.tertiary, modifier = Modifier.padding(start = 12.dp).size(20.dp))
     }
 }
 
@@ -800,6 +809,9 @@ private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, columnWidt
                     UfukPanel.Settings -> Box(inner) { DrivingGate("Ayarlar", onClose) { SettingsScreen { onNavigate(Screen.Home) } } }
                     UfukPanel.Music -> PanelWithTitle("Şimdi çalıyor", onClose) {
                         NowPlayingScreen(Modifier.fillMaxSize().padding(start = 36.dp, end = 36.dp, bottom = 28.dp))
+                    }
+                    UfukPanel.Quick -> PanelWithTitle("Hızlı ayarlar", onClose) {
+                        QuickSettingsScreen(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, bottom = 28.dp), onClose = onClose)
                     }
                     UfukPanel.Phone -> PanelWithTitle("Telefon", onClose) {
                         PhoneScreen(Modifier.fillMaxSize().padding(start = 28.dp, end = 32.dp, bottom = 28.dp))

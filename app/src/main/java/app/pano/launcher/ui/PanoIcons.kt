@@ -180,6 +180,19 @@ object PanoIcons {
 
     val Seat = line("seat", "M8 3.5c-1 4-1 8 .5 11.5h7.5a2 2 0 0 1 2 2v2.5M8.5 15l-1.5 5.5M11 9h3")
 
+    // Hızlı ayarlar
+    val Bluetooth = line("bluetooth", "M7 7.5l10 9-5 4.5V3l5 4.5-10 9")
+    val Wifi = line(
+        "wifi",
+        "M2.8 9a13.5 13.5 0 0 1 18.4 0M5.9 12.4a9 9 0 0 1 12.2 0M9 15.8a4.5 4.5 0 0 1 6 0M12 19.5h.01",
+        2f,
+    )
+    val SteeringWheel = line(
+        "steering-wheel",
+        circle(12f, 12f, 8.5f) + circle(12f, 12f, 2f) + "M3.6 11l6.4 1M20.4 11l-6.4 1M12 14v6.5",
+    )
+    val Heat = line("heat", "M8 4c-1.5 2 1.5 3.5 0 5.5M12 4c-1.5 2 1.5 3.5 0 5.5M16 4c-1.5 2 1.5 3.5 0 5.5M4.5 14h15M6 19.5h12")
+
     val Star = solid("star", "M12 2.8l2.75 5.6 6.15.9-4.45 4.35 1.05 6.1L12 16.85l-5.5 2.9 1.05-6.1L3.1 9.3l6.15-.9z")
     val Play = solid("play", "M8 4.8v14.4a1 1 0 0 0 1.5.9l11-7.2a1 1 0 0 0 0-1.8l-11-7.2A1 1 0 0 0 8 4.8z")
     val Pause = solid("pause", "M7 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM14 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z")
