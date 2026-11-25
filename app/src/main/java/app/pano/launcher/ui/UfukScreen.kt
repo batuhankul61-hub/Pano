@@ -1185,6 +1185,12 @@ private class UfukVolume(private val audio: AudioManager?) {
     var touchedAt by mutableLongStateOf(0L)
         private set
 
+    /** Ses tuşuyla değişti: değerleri tazeler ve göstergeyi açar. */
+    fun poke(at: Long) {
+        refresh()
+        touchedAt = at
+    }
+
     /** Ses başka yerden (direksiyon, sistem) değişince değerleri tazeler; göstergeyi açmaz. */
     fun refresh() {
         val a = audio ?: return
@@ -1226,6 +1232,11 @@ private fun rememberUfukVolume(): UfukVolume {
         ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         onDispose { runCatching { context.unregisterReceiver(receiver) } }
     }
+    // Ses tuşları (direksiyon) da göstergeyi açar; aracın kendi paneli çıkmaz.
+    val keyAt = app.pano.launcher.system.VolumeKeys.pressedAt.longValue
+    // Eski bir basış yeni açılan şeritte göstergeyi açmasın.
+    val firstKeyAt = remember { keyAt }
+    LaunchedEffect(keyAt) { if (keyAt != 0L && keyAt != firstKeyAt) volume.poke(keyAt) }
     return volume
 }
 

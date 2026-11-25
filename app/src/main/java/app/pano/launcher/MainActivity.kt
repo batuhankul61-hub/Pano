@@ -102,12 +102,16 @@ class MainActivity : ComponentActivity() {
     /** Pano öne gelince kendi alt şeridi var; uygulamaların üstündeki kopya kalkar. */
     override fun onStart() {
         super.onStart()
+        app.pano.launcher.system.VolumeKeys.panoVisible = true
+        // Ses tuşları ve şerit için hizmet bağlı olmalı (güncellemeden sonra kendiliğinden bağlanmayabiliyor).
+        if (app.pano.launcher.system.PanoAccessibility.instance == null) app.pano.launcher.system.SystemActions.enableOwnService(this)
         app.pano.launcher.system.BarOverlay.hide()
     }
 
     /** Pano arkaya düştü (başka bir uygulama açıldı): alt şerit o uygulamanın üstünde kalır. */
     override fun onStop() {
         super.onStop()
+        app.pano.launcher.system.VolumeKeys.panoVisible = false
         if (!isChangingConfigurations) app.pano.launcher.system.BarOverlay.show(this)
     }
 

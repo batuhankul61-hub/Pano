@@ -36,6 +36,8 @@ object SystemActions {
      * (bkz. [SystemBars]) hizmet buradan açılır: kullanıcı düğmeye bastığı anda, yalnızca
      * Pano'nun kendi hizmeti eklenir; listedeki diğer hizmetlere dokunulmaz.
      */
+    private var lastRebindAt = -60_000L
+
     internal fun enableOwnService(context: Context): Boolean {
         if (!SystemBars.canApplyGlobal(context)) return false
         val me = "${context.packageName}/${PanoAccessibility::class.java.name}"
@@ -44,10 +46,41 @@ object SystemActions {
             val list = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
             val items = list.split(':').filter { it.isNotBlank() }
             if (me !in items) Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, (items + me).joinToString(":"))
+            else if (PanoAccessibility.instance == null && android.os.SystemClock.uptimeMillis() - lastRebindAt > 30_000) {
+                // Listede ama bağlı değil: güncellemeden sonra araçta Android hizmeti yeniden bağlamadı
+                // (25.11.2026). Listeden çıkarıp yeniden eklemek bağlanmasını sağlıyor.
+                lastRebindAt = android.os.SystemClock.uptimeMillis()
+                Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, items.filter { it != me }.joinToString(":"))
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    runCatching {
+                        val now = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+                            .split(':').filter { it.isNotBlank() && it != me }
+                        Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, (now + me).joinToString(":"))
+                    }
+                }, 800)
+                Log.i(TAG, "Pano erişilebilirlik hizmeti listede ama bağlı değil, yeniden ekleniyor")
+            }
             Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
             Log.i(TAG, "Pano erişilebilirlik hizmeti açıldı")
             true
         }.onFailure { Log.w(TAG, "hizmet açılamadı: $it") }.getOrDefault(false)
+    }
+
+    /**
+     * Hizmeti kapatıp yeniden açar. Güncellemeyle yeni bir yetki eklenince (ör. ses tuşlarını yakalama)
+     * Android hizmeti eski yetkileriyle bağlı tutabiliyor; yeniden açınca yenisi gelir.
+     */
+    internal fun restartOwnService(context: Context) {
+        if (!SystemBars.canApplyGlobal(context)) return
+        val me = "${context.packageName}/${PanoAccessibility::class.java.name}"
+        runCatching {
+            val cr = context.contentResolver
+            val items = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+                .split(':').filter { it.isNotBlank() && it != me }
+            Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, items.joinToString(":"))
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ enableOwnService(context) }, 1000)
+            Log.i(TAG, "Pano erişilebilirlik hizmeti yeni yetkiler için yeniden açılıyor")
+        }.onFailure { Log.w(TAG, "hizmet yeniden açılamadı: $it") }
     }
 
     private fun global(context: Context, action: Int) {
@@ -88,6 +121,14 @@ class PanoAccessibility : AccessibilityService() {
         // Bu hizmet de sürekli bağlı kalır: sesli asistan tuşu buradan da dinlenmeye başlar.
         app.pano.launcher.assistant.VoiceKey.init(this)
         Log.i("SystemActions", "erişilebilirlik hizmeti bağlandı")
+        // Ses tuşu yetkisi yoksa (güncellemeden önceki bağlantı) bir kez yeniden açılır.
+        val canFilterKeys = serviceInfo?.capabilities?.and(
+            android.accessibilityservice.AccessibilityServiceInfo.CAPABILITY_CAN_REQUEST_FILTER_KEY_EVENTS,
+        ) != 0
+        if (!canFilterKeys && !restartedForKeys) {
+            restartedForKeys = true
+            SystemActions.restartOwnService(applicationContext)
+        }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -107,8 +148,14 @@ class PanoAccessibility : AccessibilityService() {
     }
     override fun onInterrupt() {}
 
+    /** Ses tuşları Ufuk'ta Pano'nun kendi göstergesini açar ([VolumeKeys]). */
+    override fun onKeyEvent(event: android.view.KeyEvent): Boolean =
+        VolumeKeys.handle(this, event) || super.onKeyEvent(event)
+
     companion object {
         @Volatile var instance: PanoAccessibility? = null
             private set
+        /** Ses tuşu yetkisi için yeniden açma bu süreçte yalnızca bir kez denenir (döngü olmasın). */
+        private var restartedForKeys = false
     }
 }

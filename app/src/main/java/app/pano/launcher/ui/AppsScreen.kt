@@ -31,6 +31,7 @@ import androidx.compose.ui.text.input.ImeAction
 import java.text.Normalizer
 import java.util.Locale
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -112,13 +113,14 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
     }
 }
 
-/** Yüklü tüm uygulamalar. Dokununca açılır, uzun basınca favorilere eklenir ya da çıkarılır. */
-@OptIn(ExperimentalFoundationApi::class)
+/**
+ * Yüklü tüm uygulamalar. Dokununca açılır, uzun basınca favorilere eklenir ya da çıkarılır.
+ * Favoriler en üstte kendi başlıklarıyla, favori sırasıyla durur; arama yaparken liste tek parçadır.
+ */
 @Composable
 fun AppsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val colors = LocalPano.current
-    val haptics = LocalHapticFeedback.current
     FavoritesStore.load(context)
     val favorites by FavoritesStore.state
     val apps by produceState(emptyList<AppEntry>()) {
@@ -131,12 +133,18 @@ fun AppsScreen(onBack: () -> Unit) {
         val q = normalizeForSearch(query.trim())
         if (q.isEmpty()) apps else indexed.filter { q in it.second }.map { it.first }
     }
+    val searching = query.isNotBlank()
+    // Favoriler kaydedildikleri sırayla; kaldırılmış uygulamalar atlanır.
+    val favoriteApps = remember(apps, favorites) {
+        favorites.mapNotNull { f -> apps.firstOrNull { it.packageName == f.packageName && it.className == f.className } }
+    }
+    val rest = remember(apps, favoriteApps) { apps - favoriteApps.toSet() }
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(22.dp)) {
         ScreenHeader(
             "Uygulamalar", onBack,
             subtitle = if (apps.isEmpty()) null
-            else if (query.isBlank()) "${apps.size} uygulama · favori için uzun bas"
+            else if (!searching) "${apps.size} uygulama · favori için uzun bas"
             else "${shown.size} / ${apps.size} uygulama",
         )
         SearchField(query, { query = it })
@@ -152,36 +160,65 @@ fun AppsScreen(onBack: () -> Unit) {
             contentPadding = PaddingValues(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            items(shown, key = { it.packageName + "/" + it.className }) { app ->
-                val favorite = favorites.any { it.packageName == app.packageName && it.className == app.className }
-                val source = rememberLaunchSource()
-                Column(
-                    Modifier.clip(RoundedCornerShape(20.dp))
-                        .combinedClickable(
-                            role = Role.Button,
-                            onLongClickLabel = if (favorite) "Favorilerden çıkar" else "Favorilere ekle",
-                            onLongClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                val msg = when (FavoritesStore.toggle(FavoriteApp(app.packageName, app.className, app.label))) {
-                                    FavoritesStore.Result.Added -> "${app.label} favorilere eklendi"
-                                    FavoritesStore.Result.Removed -> "${app.label} favorilerden çıkarıldı"
-                                    FavoritesStore.Result.Full -> "En fazla ${FavoritesStore.MAX} favori eklenebilir"
-                                }
-                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                            },
-                        ) { Launch.app(context, app.packageName, app.className, source.anchor()) }
-                        .padding(vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    // Uygulama tam bu ikonun yerinden büyüyerek açılır.
-                    AppIcon(app.packageName, app.className, 80.dp, Modifier.launchSource(source), favorite = favorite)
-                    Text(
-                        app.label, color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Medium,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp, start = 8.dp, end = 8.dp),
-                    )
+            // Sabit ilk öğe: liste en üstteyken favori eklenince kaydırma ona tutunur, yeni Favoriler
+            // bölümü görünür kalır (yoksa ilk uygulamaya tutunup aşağı kayıyordu).
+            item(key = "ust", span = { GridItemSpan(maxLineSpan) }) { Box(Modifier.fillMaxWidth().height(1.dp)) }
+            if (searching || favoriteApps.isEmpty()) {
+                items(shown, key = { it.packageName + "/" + it.className }) { app -> AppCell(app, favorites) }
+            } else {
+                item(key = "baslik-favoriler", span = { GridItemSpan(maxLineSpan) }) { SectionTitle("Favoriler") }
+                items(favoriteApps, key = { "fav/" + it.packageName + "/" + it.className }) { app -> AppCell(app, favorites) }
+                item(key = "baslik-tumu", span = { GridItemSpan(maxLineSpan) }) {
+                    SectionTitle("Tüm uygulamalar", Modifier.padding(top = 12.dp))
                 }
+                items(rest, key = { it.packageName + "/" + it.className }) { app -> AppCell(app, favorites) }
             }
         }
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
+    val colors = LocalPano.current
+    Text(
+        text, color = colors.secondary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+        modifier = modifier.fillMaxWidth().padding(start = 12.dp),
+    )
+}
+
+/** Tek uygulama: dokununca açılır, uzun basınca favorilere eklenir / çıkarılır. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AppCell(app: AppEntry, favorites: List<FavoriteApp>) {
+    val context = LocalContext.current
+    val colors = LocalPano.current
+    val haptics = LocalHapticFeedback.current
+    val favorite = favorites.any { it.packageName == app.packageName && it.className == app.className }
+    val source = rememberLaunchSource()
+    Column(
+        Modifier.clip(RoundedCornerShape(20.dp))
+            .combinedClickable(
+                role = Role.Button,
+                onLongClickLabel = if (favorite) "Favorilerden çıkar" else "Favorilere ekle",
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val msg = when (FavoritesStore.toggle(FavoriteApp(app.packageName, app.className, app.label))) {
+                        FavoritesStore.Result.Added -> "${app.label} favorilere eklendi"
+                        FavoritesStore.Result.Removed -> "${app.label} favorilerden çıkarıldı"
+                        FavoritesStore.Result.Full -> "En fazla ${FavoritesStore.MAX} favori eklenebilir"
+                    }
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                },
+            ) { Launch.app(context, app.packageName, app.className, source.anchor()) }
+            .padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // Uygulama tam bu ikonun yerinden büyüyerek açılır.
+        AppIcon(app.packageName, app.className, 80.dp, Modifier.launchSource(source), favorite = favorite)
+        Text(
+            app.label, color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp, start = 8.dp, end = 8.dp),
+        )
     }
 }
