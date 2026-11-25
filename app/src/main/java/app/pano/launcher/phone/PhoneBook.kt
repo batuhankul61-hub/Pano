@@ -92,27 +92,59 @@ object PhoneBook {
     fun digits(number: String): String = number.filter { it.isDigit() }.takeLast(10)
 }
 
-/** Aramayı başlatır: izin varsa doğrudan arar, yoksa aracın telefon ekranını numarayla açar. */
+/**
+ * Aramayı başlatır.
+ *
+ * BYD'nin telefon uygulaması başka uygulamalardan gelen `ACTION_CALL`'u aramaz, yalnızca numarayı
+ * ekranına koyar (araçta görüldü, 25.11.2026). Bu yüzden arama doğrudan Android'in arama sistemiyle
+ * (Telecom) ve **telefonun Bluetooth hattıyla** (HfpClientConnectionService) başlatılır; aracın kendi
+ * SIM hattı asla seçilmez. Hat bulunamazsa (izin yok, telefon bağlı değil) eski yol: BYD'nin ekranı
+ * numarayla açılır.
+ */
 object PhoneCall {
     private const val TAG = "PhoneCall"
+    private const val HFP_SERVICE = "com.android.bluetooth.hfpclient.connserv.HfpClientConnectionService"
 
     fun canCallDirectly(context: Context) =
         context.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+
+    fun canFindLine(context: Context) =
+        context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+
+    /** Telefonun Bluetooth (HFP) arama hattı; yoksa null. */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun bluetoothLine(context: Context): android.telecom.PhoneAccountHandle? {
+        if (!canFindLine(context)) return null
+        val telecom = context.getSystemService(android.telecom.TelecomManager::class.java) ?: return null
+        return runCatching {
+            telecom.callCapablePhoneAccounts.firstOrNull { it.componentName.className == HFP_SERVICE }
+        }.onFailure { Log.w(TAG, "hatlar okunamadı: $it") }.getOrNull()
+    }
 
     fun call(context: Context, number: String) {
         val clean = number.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
         if (clean.isEmpty()) return
         val uri = Uri.fromParts("tel", clean, null)
-        val direct = canCallDirectly(context)
-        val intent = Intent(if (direct) Intent.ACTION_CALL else Intent.ACTION_DIAL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (canCallDirectly(context)) {
+            val line = bluetoothLine(context)
+            if (line != null) {
+                val placed = runCatching {
+                    val extras = android.os.Bundle().apply {
+                        putParcelable(android.telecom.TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, line)
+                    }
+                    context.getSystemService(android.telecom.TelecomManager::class.java)!!.placeCall(uri, extras)
+                }.onFailure { Log.w(TAG, "Telecom ile aranamadı: $it") }.isSuccess
+                if (placed) { Log.i(TAG, "arama telefonun Bluetooth hattıyla başlatıldı"); return }
+            } else {
+                Log.i(TAG, "telefonun Bluetooth hattı bulunamadı (izin: ${canFindLine(context)})")
+            }
+        }
+        // Yedek: BYD'nin telefon ekranı numarayla açılır, kullanıcı oradan arar.
         try {
-            context.startActivity(intent)
-            Log.i(TAG, if (direct) "arama başlatıldı" else "telefon ekranı numarayla açıldı")
+            context.startActivity(Intent(Intent.ACTION_DIAL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            Log.i(TAG, "telefon ekranı numarayla açıldı")
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(context, "Bu araçta arama yapılamıyor", Toast.LENGTH_SHORT).show()
-        } catch (e: SecurityException) {
-            Log.w(TAG, "arama izni: $e")
-            runCatching { context.startActivity(Intent(Intent.ACTION_DIAL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }
     }
 }

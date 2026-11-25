@@ -22,6 +22,8 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- Aramanın telefonun Bluetooth hattından çıkması için hatları okumak (aracın SIM'i seçilmesin). -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <!-- Uygulama içi güncelleme: GitHub'dan indirilen yeni sürümü kurmak için (kullanıcı onaylar) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Sistem çubuklarını tüm uygulamalarda gizlemek için; yalnızca adb ile verilebilir (pm grant) -->

@@ -80,13 +80,14 @@ fun PhoneScreen(modifier: Modifier = Modifier) {
     val askAccess = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { reload++ }
     // Aranacak numara izin sorulurken bekler; izin verilmezse aracın telefon ekranı numarayla açılır.
     var pendingCall by remember { mutableStateOf<String?>(null) }
-    val askCall = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+    // Arama izni ve telefonun Bluetooth hattını bulmak için hat okuma izni birlikte istenir.
+    val askCall = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         pendingCall?.let { PhoneCall.call(context, it) }
         pendingCall = null
     }
     val call: (String) -> Unit = { n ->
-        if (PhoneCall.canCallDirectly(context)) PhoneCall.call(context, n)
-        else { pendingCall = n; askCall.launch(Manifest.permission.CALL_PHONE) }
+        if (PhoneCall.canCallDirectly(context) && PhoneCall.canFindLine(context)) PhoneCall.call(context, n)
+        else { pendingCall = n; askCall.launch(arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE)) }
     }
 
     // Tuş takımına yazılınca liste numarayla eşleşen kişilere daralır.
