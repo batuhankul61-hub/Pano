@@ -65,9 +65,6 @@ object BarOverlay {
     private var unitPx = 1f
     /** Aracın ana ekranı önde: şerit görünmez ve dokunuş almaz. */
     private var suppressed = false
-
-    /** Şerit şu an bir uygulamanın üstünde görünüyor mu (ses tuşları göstergesini burada açar). */
-    val visible: Boolean get() = view != null && !suppressed
     /** Şeridin boyu (piksel); uygulamalardan bu kadar yer ayrılır. */
     private var barPx = 0
     /** Ekranın gerçek yüksekliği (piksel). */
