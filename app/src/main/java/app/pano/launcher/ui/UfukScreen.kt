@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -145,6 +146,17 @@ internal val BarHeight = 112.dp
  */
 internal val OverlayBarHeight = 72.dp
 
+/**
+ * Mesaj banner'ının Ufuk'taki yeri: harita alanında, araç sütunu ile saat/hava kapsülünün arasında.
+ * Ekranın ortasına konunca vites ve menzil satırını örtüyordu. Değerler tasarım tuvali biriminde.
+ */
+internal object UfukBannerArea {
+    /** Soldan boşluk: araç sütunu (sürüşte daralır) + haritanın kenar boşluğu. */
+    var start by mutableStateOf(CarColumnWidth + 24.dp)
+    /** Sağdan boşluk: saat/hava kapsülü (genişliği havaya göre değişir) ve iki yanındaki boşluk. */
+    var end by mutableStateOf(320.dp)
+}
+
 /** Sürüşte kısıtlama: araç hareket ediyor **ve** ayarlarda açık. */
 @Composable
 private fun ufukDrivingLocked(): Boolean {
@@ -196,6 +208,7 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
                     val columnWidth by animateDpAsState(
                         if (compact) CarColumnCompactWidth else CarColumnWidth, tween(UfukMotionMs * 2), label = "araç-sütunu",
                     )
+                    androidx.compose.runtime.SideEffect { UfukBannerArea.start = columnWidth + 24.dp }
                     Row(Modifier.fillMaxSize()) {
                         CarColumn(compact, Modifier.width(columnWidth).fillMaxHeight())
                         MapCanvas(Modifier.weight(1f).fillMaxHeight(), endInset = if (navNarrow) NavNarrowInset else 0f)
@@ -529,8 +542,10 @@ private fun ClockWeather(modifier: Modifier) {
         while (true) { value = System.currentTimeMillis(); delay(1_000) }
     }
     val weather by WeatherHub.state.collectAsState()
+    val density = androidx.compose.ui.platform.LocalDensity.current
     Row(
-        modifier.height(72.dp).clip(RoundedCornerShape(36.dp)).background(c.glass)
+        modifier.onSizeChanged { UfukBannerArea.end = with(density) { it.width.toDp() } + 48.dp }
+            .height(72.dp).clip(RoundedCornerShape(36.dp)).background(c.glass)
             .border(1.dp, c.hairline, RoundedCornerShape(36.dp)).padding(horizontal = 26.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

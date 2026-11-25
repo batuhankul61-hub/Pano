@@ -21,7 +21,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -40,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.pano.launcher.Launch
@@ -57,9 +59,11 @@ private const val VISIBLE_MS = 7_000L
  * Yeni WhatsApp / SMS mesajı geldiğinde ekranın üstünde birkaç saniye görünen kart.
  * Dokununca mesajın uygulaması (mümkünse doğrudan sohbet) açılır; kapat düğmesi hemen gizler.
  * Ekranın tamamını kaplayan bir katmandır; düzenlerin en üstüne tek satırla eklenir.
+ * [start] / [end]: kartın ortalanacağı alanın yanlardan boşluğu (tasarım tuvali birimi); Ufuk'ta
+ * kart araç sütununu ve saati örtmesin diye harita alanına sığdırılır, dar alanda kart daralır.
  */
 @Composable
-fun MessageBanner() {
+fun MessageBanner(start: Dp = 0.dp, end: Dp = 0.dp) {
     val message by MessageHub.state.collectAsState()
     val enabled = LocalStyle.current.showMessages
     // Kayarak çıkarken içerik boşalmasın diye son mesajı tut.
@@ -76,7 +80,7 @@ fun MessageBanner() {
 
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         DesignCanvas {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            Box(Modifier.fillMaxSize().padding(start = start, end = end), contentAlignment = Alignment.TopCenter) {
                 AnimatedVisibility(
                     visible = enabled && message != null,
                     enter = slideInVertically { -it } + fadeIn(),
@@ -97,7 +101,8 @@ private fun BannerCard(msg: IncomingMessage) {
     Row(
         Modifier
             .padding(top = 22.dp)
-            .width(900.dp)
+            .widthIn(max = 900.dp)
+            .fillMaxWidth()
             .height(124.dp)
             .surface(shape, colors.card, colors.isDark, colors.hairline, elevation = 28.dp)
             .clickable(role = Role.Button, onClickLabel = "${msg.appName} uygulamasını aç") {
