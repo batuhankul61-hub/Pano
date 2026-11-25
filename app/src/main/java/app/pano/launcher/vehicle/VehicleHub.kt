@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import app.pano.launcher.BuildConfig
 import app.pano.launcher.ui.hasLocationPermission
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -129,6 +130,8 @@ data class VehicleState(
     /** Sürüş modu ve rejen seviyesi; okunamazsa null (önizlemede hep null). */
     val driveMode: DriveMode? = null,
     val regen: RegenLevel? = null,
+    /** Şarj durumu; sinyal yoksa null. Önizlemede yalnızca debug ayarıyla örnek değer. */
+    val charge: ChargeState? = null,
 ) {
     val consumptionKwh100: Float? get() = consumption?.kwh100
 }
@@ -163,6 +166,20 @@ object VehicleHub {
     private val _state = MutableStateFlow(PREVIEW)
     val state: StateFlow<VehicleState> = _state.asStateFlow()
 
+    /**
+     * Emülatörde şarj görünümünü denemek için örnek (yalnızca debug sürümde ve önizlemede;
+     * arayüz "Önizleme" yazar). Aç: `run-as app.pano.launcher` ile `shared_prefs/pano_debug.xml`
+     * içine `<boolean name="preview_charging" value="true" />`, sonra Pano'yu yeniden başlat.
+     */
+    val PREVIEW_CHARGE = ChargeState(
+        plugged = true, charging = true, kind = ChargeKind.AC,
+        powerKw = 6.6f, remainingMin = 14 * 60 + 29, targetPercent = 100,
+    )
+    private const val PREVIEW_CHARGE_BATTERY = 57
+
+    @Volatile private var previewCharging = false
+    @Volatile private var lastChargeLog: String? = null
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Araç sürülüyor mu: vites D/R ya da hız > ~5 km/s. PARK → SÜRÜŞ geçişi için. */
@@ -178,6 +195,8 @@ object VehicleHub {
         // İzin sonradan verildiyse GPS dinleyicisi burada bağlanır.
         startGps(app)
         if (job?.isActive == true) return
+        previewCharging = BuildConfig.DEBUG &&
+            app.getSharedPreferences("pano_debug", Context.MODE_PRIVATE).getBoolean("preview_charging", false)
         scope.launch { isDriving.collect { Log.i(TAG, if (it) "SÜRÜŞ" else "PARK") } }
         job = scope.launch {
             val byd = BydBus.init(app)
@@ -212,12 +231,25 @@ object VehicleHub {
     private fun compose(byd: Boolean, slow: SlowReadings): VehicleState {
         val gps = gpsSpeedKmh()
         if (!byd) {
-            return PREVIEW.copy(
+            val preview = PREVIEW.copy(
                 speedKmh = gps,
                 speedSource = if (gps != null) SpeedSource.Gps else SpeedSource.None,
             )
+            // Şarj önizlemesi park halindeki aracı canlandırır: emülatörün GPS hızı yok sayılır.
+            return if (previewCharging) {
+                preview.copy(
+                    charge = PREVIEW_CHARGE, batteryPercent = PREVIEW_CHARGE_BATTERY,
+                    gear = Gear.P, speedKmh = null, speedSource = SpeedSource.None,
+                )
+            } else preview
         }
         val busSpeed = runCatching { BydSignals.speedKmh() }.getOrNull()
+        val charge = runCatching { BydCharging.read() }.onFailure { Log.w(TAG, "şarj okunamadı: $it") }.getOrNull()
+        val chargeLog = charge?.let { "takılı=${it.plugged} şarj=${it.charging} bitti=${it.finished} etkin=${it.isActive}" }
+        if (chargeLog != lastChargeLog) {
+            lastChargeLog = chargeLog
+            Log.i(TAG, "şarj: ${chargeLog ?: "sinyal yok"}")
+        }
         val speed = busSpeed ?: gps
         return VehicleState(
             isPreview = false,
@@ -241,6 +273,7 @@ object VehicleHub {
             openings = runCatching { BydSignals.openings() }.getOrNull(),
             // Kapı kilitleri (sürücü kapısı dahil hepsi); okunamazsa null.
             locked = runCatching { VehicleControls.lockedState() }.getOrNull(),
+            charge = charge,
         )
     }
 

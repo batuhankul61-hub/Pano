@@ -213,6 +213,9 @@ yine protokole göre çözülür, yansımayla okunur.
 - **Enerji/istatistik — Statistic (1014), Energy (1006):** `STATISTIC_ELEC_DRIVING_RANGE`
   (menzil), `STATISTIC_ESTIMATE_SOC_V1` (SOC), `STATISTIC_DD_MILEAGE1/2`,
   `STATISTIC_AVERAGE_BATTERY_TEMP`, `STATISTIC_BATTERY_AVAILABLE_POWER`. Çoğu `getDouble`.
+- **Şarj — Charging (1009):** alan adları bu belgeye henüz çıkarılmadı. Pano bunları
+  çalışma anında listeleyip ada göre seçiyor (`vehicle/BydCharging.kt`); araçta şarjdayken
+  logcat'teki `şarj alanları (...)` satırı gerçek listeyi verir, buraya eklenmeli.
 - **Lastik — Tyre (parça: `BYDAutoTyreDevice`):** TPMS basınç/sıcaklık ve uyarılar.
 - **Gövde ek:** `BODYWORK_BATTERY_VOLTAGE_LEVEL` (12V akü: 1=düşük, 2=normal),
   `BODYWORK_AUTO_VIN` (VIN), `BODYWORK_ALARM_STATE`.
