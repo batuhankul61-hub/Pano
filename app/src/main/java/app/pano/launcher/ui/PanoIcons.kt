@@ -118,6 +118,21 @@ object PanoIcons {
     /** Tuş takımında son rakamı sil. */
     val Backspace = line("delete.left", "M9 5.5h10a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-6-6.5zM11.5 9.5l5 5M16.5 9.5l-5 5")
     /** Gelen / giden / cevapsız arama okları. */
+    /** Görüşme ekranı: mikrofon kapalı, tuş takımı, telefona aktar, kapat. */
+    val MicOff = line("mic.slash", "M9 6.5a3 3 0 0 1 5.6-1.5M15 10v2a3 3 0 0 1-4.6 2.5M5.5 11.5a6.5 6.5 0 0 0 10.6 5M18.4 13a6.5 6.5 0 0 0 .1-1.5M12 18v3M4 4l16 16")
+    val Keypad = line(
+        "keypad",
+        circle(6.5f, 5f, 1.2f) + circle(12f, 5f, 1.2f) + circle(17.5f, 5f, 1.2f) +
+            circle(6.5f, 10.5f, 1.2f) + circle(12f, 10.5f, 1.2f) + circle(17.5f, 10.5f, 1.2f) +
+            circle(6.5f, 16f, 1.2f) + circle(12f, 16f, 1.2f) + circle(17.5f, 16f, 1.2f) + circle(12f, 21f, 1.2f),
+    )
+    /** Cep telefonu: sesi telefona aktar. */
+    val Handset = line("iphone", "M8.5 2.5h7A1.5 1.5 0 0 1 17 4v16a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 7 20V4a1.5 1.5 0 0 1 1.5-1.5zM10.5 5h3M11 18.5h2")
+    /** Ahize aşağı: aramayı kapat / reddet. */
+    val PhoneDown = line(
+        "phone.down",
+        "M3.2 14.2l-.6-2.1c-.2-.7 0-1.4.6-1.9C5.6 8.3 8.7 7.3 12 7.3s6.4 1 8.8 2.9c.6.5.8 1.2.6 1.9l-.6 2.1a1.4 1.4 0 0 1-1.6 1l-3-.6a1.4 1.4 0 0 1-1.1-1.2l-.2-1.7a9.5 9.5 0 0 0-5.8 0l-.2 1.7a1.4 1.4 0 0 1-1.1 1.2l-3 .6a1.4 1.4 0 0 1-1.6-1z",
+    )
     val CallIn = line("call.in", "M18 6L8 16M8 9v7h7", 2f)
     val CallOut = line("call.out", "M7 17L17 7M10 7h7v7", 2f)
     val Message = line("message", "M12 4c4.7 0 8.5 3.1 8.5 7s-3.8 7-8.5 7c-1 0-2-.1-2.9-.4L5 19.5l1.2-3.4C4.5 14.8 3.5 13 3.5 11c0-3.9 3.8-7 8.5-7z")

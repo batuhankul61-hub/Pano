@@ -24,6 +24,13 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <!-- Aramanın telefonun Bluetooth hattından çıkması için hatları okumak (aracın SIM'i seçilmesin). -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- Pano'nun görüşme kartı: gelen aramayı cevaplamak / aramayı kapatmak (Telecom yedeği), mikrofonu
+         kapatmak ve aracın Bluetooth eller serbest istemcisiyle konuşmak (Android 10'da normal izin). -->
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <!-- Telecom'un Pano'nun arayüzsüz InCallService'ine bağlanması için (arama yardımcısı uygulama; normal izin). -->
+    <uses-permission android:name="android.permission.CALL_COMPANION_APP" />
     <!-- Uygulama içi güncelleme: GitHub'dan indirilen yeni sürümü kurmak için (kullanıcı onaylar) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Sistem çubuklarını tüm uygulamalarda gizlemek için; yalnızca adb ile verilebilir (pm grant) -->
@@ -110,6 +117,17 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/pano_accessibility" />
+        </service>
+
+        <!-- Görüşme bilgisi Telecom'dan (yalnızca Pano "arama yardımcısı" rolündeyse bağlanır; phone/PanoInCallService.kt) -->
+        <service
+            android:name=".phone.PanoInCallService"
+            android:exported="true"
+            android:permission="android.permission.BIND_INCALL_SERVICE">
+            <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="false" />
+            <intent-filter>
+                <action android:name="android.telecom.InCallService" />
+            </intent-filter>
         </service>
 
         <!-- Pano Asistan: direksiyon tuşuyla arka planda açılan oturum (assistant/VoiceKey.kt) -->

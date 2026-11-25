@@ -202,6 +202,20 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
                     }
                     // Kartlar haritanın üstünde açılır; klima geniş olduğu için araç sütununu da örter.
                     PanelHost(panel, navNarrow, columnWidth, climate, onNavigate, onClose = ::closePanel)
+                    // Görüşme kartı: açık kartların da üstünde, sağ üstte. Erişilebilirlik katmanı
+                    // açıksa (BYD penceresini örtüyorsa) kartı o çizer, burada çizilmez.
+                    val call by app.pano.launcher.phone.CallHub.state.collectAsState()
+                    val shown = call?.takeIf { !app.pano.launcher.system.CallOverlay.covering.value }
+                    androidx.compose.animation.AnimatedVisibility(
+                        shown != null,
+                        enter = fadeIn(tween(UfukMotionMs)),
+                        exit = fadeOut(tween(UfukMotionMs)),
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 24.dp),
+                    ) {
+                        var lastCall by remember { mutableStateOf(shown) }
+                        if (shown != null) lastCall = shown
+                        lastCall?.let { CallCard(it, Modifier.width(CallCardWidth)) }
+                    }
                     // Ses göstergesi ses düğmelerinin üstünde; harita düğmeleri (72 dp) ve alttaki
                     // OpenStreetMap atfı açıkta kalır.
                     VolumeHud(volume, Modifier.align(Alignment.BottomEnd).padding(end = 112.dp, bottom = 40.dp))

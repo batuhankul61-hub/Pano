@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Pano</string>
-    <string name="accessibility_description">Pano\'nun alt şeridindeki Geri, Son uygulamalar ve Yarım ekran düğmelerinin çalışması ve sağ panelde küçük pencere olarak açılmış uygulamaların sonra tam ekran açılabilmesi için (yalnızca pencere çubuğundaki büyüt düğmesine basar). Ekrandaki yazıları okumaz, kaydetmez.</string>
+    <string name="accessibility_description">Pano\'nun alt şeridindeki Geri, Son uygulamalar ve Yarım ekran düğmelerinin çalışması ve sağ panelde küçük pencere olarak açılmış uygulamaların sonra tam ekran açılabilmesi için (yalnızca pencere çubuğundaki büyüt düğmesine basar). Görüşme sırasında aracın arama penceresinin yerine Pano\'nun arama kartını açar; bunun için yalnızca o penceredeki kişi adını, numarayı ve süreyi okur. Başka ekranlardaki yazıları okumaz, hiçbir şeyi kaydetmez.</string>
 </resources>
