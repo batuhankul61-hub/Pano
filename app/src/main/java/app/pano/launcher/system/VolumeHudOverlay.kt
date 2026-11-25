@@ -82,6 +82,7 @@ object VolumeHudOverlay {
 
     private var service: AccessibilityService? = null
     private var receiver: BroadcastReceiver? = null
+    private var muteReceiver: BroadcastReceiver? = null
     private var view: ComposeView? = null
     private var owner: Owner? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -107,11 +108,18 @@ object VolumeHudOverlay {
         ContextCompat.registerReceiver(
             s, r, IntentFilter("android.media.VOLUME_CHANGED_ACTION"), ContextCompat.RECEIVER_NOT_EXPORTED,
         )
+        BydMute.init(s)
+        muteReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) =
+                onMuteChanged(intent?.getBooleanExtra("android.media.extra.SYSTEM_MUTE_STATUS", false) == true)
+        }.also { ContextCompat.registerReceiver(s, it, IntentFilter(BydMute.ACTION), ContextCompat.RECEIVER_EXPORTED) }
     }
 
     fun detach() {
         receiver?.let { r -> runCatching { service?.unregisterReceiver(r) } }
         receiver = null
+        muteReceiver?.let { r -> runCatching { service?.unregisterReceiver(r) } }
+        muteReceiver = null
         removeWindow()
         service = null
     }
@@ -143,13 +151,25 @@ object VolumeHudOverlay {
         show()
     }
 
+    /** Direksiyon tekeriyle sessize alındı / açıldı: bar "Kapalı" ya da düzeyle açılır. */
+    private fun onMuteChanged(on: Boolean) {
+        if (PanoSettings.state.value.layout != LayoutStyle.Ufuk) return
+        val a = audio() ?: return
+        if (!inCall(a)) media.stream.intValue = AudioManager.STREAM_MUSIC
+        naviActive.value = false
+        refresh(a)
+        // Bu yayın BydMute'unkinden önce işlenebilir; durum doğrudan yayından alınır.
+        media.muted.value = on || a.isStreamMute(media.stream.intValue)
+        show()
+    }
+
     private fun refresh(a: AudioManager) {
         for (s in listOf(media, navi)) {
             val st = s.stream.intValue
             runCatching {
                 s.max.intValue = a.getStreamMaxVolume(st).coerceAtLeast(1)
                 s.level.intValue = a.getStreamVolume(st)
-                s.muted.value = a.isStreamMute(st)
+                s.muted.value = a.isStreamMute(st) || (s === media && BydMute.muted.value)
             }
         }
     }

@@ -63,7 +63,7 @@ object Overscan {
     @Synchronized
     private fun write(bottom: Int) {
         runCatching {
-            exemptHiddenApi()
+            HiddenApi.exempt("Landroid/view/IWindowManager", "Landroid/view/WindowManagerGlobal")
             val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getWindowManagerService").invoke(null)
                 ?: error("pencere yöneticisi yok")
             wm.javaClass.getMethod(
@@ -76,24 +76,5 @@ object Overscan {
             applied = null
             Log.w(TAG, "yazılamadı: ${(it as? java.lang.reflect.InvocationTargetException)?.targetException ?: it}")
         }
-    }
-
-    private var exempted = false
-
-    /**
-     * Android 10 gizli sistem yöntemlerini uygulamalara kapatır; Pano yalnızca kendi süreci için ve
-     * yalnızca pencere yöneticisi sınıfları için bu kısıtı kaldırır.
-     */
-    private fun exemptHiddenApi() {
-        if (exempted) return
-        runCatching {
-            val forName = Class::class.java.getDeclaredMethod("forName", String::class.java)
-            val getMethod = Class::class.java.getDeclaredMethod("getDeclaredMethod", String::class.java, arrayOf<Class<*>>()::class.java)
-            val vm = forName.invoke(null, "dalvik.system.VMRuntime") as Class<*>
-            val getRuntime = getMethod.invoke(vm, "getRuntime", null) as java.lang.reflect.Method
-            val setExemptions = getMethod.invoke(vm, "setHiddenApiExemptions", arrayOf(arrayOf<String>()::class.java)) as java.lang.reflect.Method
-            setExemptions.invoke(getRuntime.invoke(null), arrayOf("Landroid/view/IWindowManager", "Landroid/view/WindowManagerGlobal"))
-            exempted = true
-        }.onFailure { Log.w(TAG, "gizli API izni alınamadı: $it") }
     }
 }

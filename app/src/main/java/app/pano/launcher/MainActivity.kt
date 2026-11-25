@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
         Settings.load(this)
         // Önceki oturumdan kalan alt boşluğu sıfırla; Pano çökerse de sıfırlansın.
         app.pano.launcher.system.Overscan.installGuard(this)
+        app.pano.launcher.system.BydMute.init(this)
         // Pencere her zaman tüm ekranı kaplar; sistem çubukları görünüp kaybolunca pencere boyu
         // değişmez (içerik kenar boşluklarını kendisi ayarlar). Sağ paneldeki uygulama penceresi
         // Pano'nun ölçtüğü yerde kalsın diye gerekli.

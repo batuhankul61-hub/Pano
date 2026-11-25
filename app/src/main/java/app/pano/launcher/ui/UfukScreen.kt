@@ -1175,11 +1175,12 @@ private const val VolumeHudMs = 2_500L
  * Medya sesinin durumu. Alt çubuktaki düğmeler ve göstergesi aynı durumu paylaşır.
  * Sistem ses paneli hiçbir yerde açılmaz (FLAG_SHOW_UI yok); yerine Ufuk'un kendi göstergesi çıkar.
  */
-private class UfukVolume(private val audio: AudioManager?) {
+private class UfukVolume(private val context: Context, private val audio: AudioManager?) {
     val max: Int = (audio?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 1).coerceAtLeast(1)
     var level by mutableIntStateOf(audio?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0)
         private set
-    var muted by mutableStateOf(audio?.isStreamMute(AudioManager.STREAM_MUSIC) == true)
+    // BYD'de direksiyon tekeri kendi genel sessizini kullanıyor ([BydMute]); ikisinden biri sessizse sessiz.
+    var muted by mutableStateOf(audio?.isStreamMute(AudioManager.STREAM_MUSIC) == true || app.pano.launcher.system.BydMute.muted.value)
         private set
     /** Son dokunuşun zamanı; değişince gösterge açılır ve süresi baştan başlar. */
     var touchedAt by mutableLongStateOf(0L)
@@ -1189,12 +1190,15 @@ private class UfukVolume(private val audio: AudioManager?) {
     fun refresh() {
         val a = audio ?: return
         level = a.getStreamVolume(AudioManager.STREAM_MUSIC)
-        muted = a.isStreamMute(AudioManager.STREAM_MUSIC)
+        muted = a.isStreamMute(AudioManager.STREAM_MUSIC) || app.pano.launcher.system.BydMute.muted.value
     }
 
     fun adjust(direction: Int) {
         app.pano.launcher.system.VolumeHudOverlay.markOwnChange()
-        runCatching { audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0) }
+        // Sessiz düğmesi BYD'nin genel sessizini kullanır (direksiyon tekeriyle aynı durum); yoksa Android'inki.
+        val bydMute = direction == AudioManager.ADJUST_TOGGLE_MUTE &&
+            app.pano.launcher.system.BydMute.set(context, !muted)
+        if (!bydMute) runCatching { audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0) }
         refresh()
         touchedAt = SystemClock.uptimeMillis()
     }
@@ -1204,7 +1208,10 @@ private class UfukVolume(private val audio: AudioManager?) {
         if (v != level || muted) {
             app.pano.launcher.system.VolumeHudOverlay.markOwnChange()
             runCatching {
-                if (muted && v > 0) audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+                if (muted && v > 0) {
+                    app.pano.launcher.system.BydMute.set(context, false)
+                    audio?.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+                }
                 audio?.setStreamVolume(AudioManager.STREAM_MUSIC, v, 0)
             }
             refresh()
@@ -1216,7 +1223,10 @@ private class UfukVolume(private val audio: AudioManager?) {
 @Composable
 private fun rememberUfukVolume(): UfukVolume {
     val context = LocalContext.current
-    val volume = remember { UfukVolume(context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager) }
+    val volume = remember { UfukVolume(context.applicationContext, context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager) }
+    // Direksiyon tekeriyle sessize alma/açma da alt çubuğa yansısın.
+    val bydMuted by app.pano.launcher.system.BydMute.muted.collectAsState()
+    LaunchedEffect(bydMuted) { volume.refresh() }
     // Direksiyondan ya da başka uygulamadan değişen ses de alt çubuğa yansısın.
     DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
