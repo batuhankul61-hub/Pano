@@ -2,6 +2,10 @@
 
 Araç ekranları (BYD DiLink gibi Android head unit'ler) için Jetpack Compose ile yazılmış bir Android launcher. BYD Atto 2 (DiLink 3.0, Android 10) üzerinde günlük kullanılıyor ve geliştiriliyor.
 
+[![Pano tanıtım videosu](docs/ekran-goruntuleri/tanitim-kapak.jpg)](https://github.com/batuhankul61-hub/Pano/releases/download/v142/Pano-tanitim.mp4)
+
+▶ **[Tanıtım videosunu izle](https://github.com/batuhankul61-hub/Pano/releases/download/v142/Pano-tanitim.mp4)** (1 dk; müzik: Sascha Ende, ende.app, CC BY 4.0)
+
 ![Pano, yatay ekran](docs/ekran-goruntuleri/yatay-ana.png)
 
 <p>
