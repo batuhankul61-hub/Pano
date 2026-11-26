@@ -104,6 +104,12 @@ object PanoIcons {
             "M17.5 14.5c.3 1.6 1 2.3 2.5 2.5-1.5.2-2.2.9-2.5 2.5-.3-1.6-1-2.3-2.5-2.5 1.5-.2 2.2-.9 2.5-2.5z",
     )
 
+    /** İki anahtar: hızlı ayarlar. */
+    val Toggles = line(
+        "toggles",
+        "M8 4h8a3.5 3.5 0 0 1 0 7H8a3.5 3.5 0 0 1 0-7zM8 13h8a3.5 3.5 0 0 1 0 7H8a3.5 3.5 0 0 1 0-7z" +
+            circle(16f, 7.5f, 1.75f) + circle(8f, 16.5f, 1.75f),
+    )
     val Sliders = line("sliders", "M4 7h9M17 7h3M4 17h3M11 17h9" + circle(15f, 7f, 2f) + circle(9f, 17f, 2f))
     val Lock = line("lock", "M7 10.5h10a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6.5a2 2 0 0 1 2-2zM8 10.5V8a4 4 0 0 1 8 0v2.5")
     val Unlock = line("unlock", "M7 10.5h10a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-6.5a2 2 0 0 1 2-2zM8 10.5V8a4 4 0 0 1 7.6-1.8")

@@ -169,6 +169,14 @@ private fun SectionList(selected: SettingsSection, onSelect: (SettingsSection) -
 private fun GeneralSection() {
     val style = LocalStyle.current
     val context = LocalContext.current
+    // Hızlı ayarlar kartının aynısı (parlaklık, tema, ekranı kapat, bağlantılar, koltuk/direksiyon).
+    Column {
+        Text(
+            "Hızlı ayarlar", color = LocalPano.current.secondary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 20.dp, bottom = 10.dp),
+        )
+        QuickSettingsScreen(scroll = false, onClose = {})
+    }
     Group("Sistem") {
         LinkRow("Android ayarları", "Wi-Fi, Bluetooth, ses, ekran") { Launch.settings(context) }
         Divider()

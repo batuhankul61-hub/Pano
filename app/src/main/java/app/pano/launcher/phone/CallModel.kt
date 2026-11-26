@@ -106,6 +106,16 @@ object CallScreenText {
 
     fun isDuration(text: String) = durationRe.matches(text.trim())
 
+    /**
+     * Arama penceresini yalnızca gizleyen düğme mi (BYD: `float_screen_dismiss_btn`). Reddet/kapat
+     * düğmeleri asla sayılmaz: bu düğmeye basmak aramayı etkilememeli.
+     */
+    fun isDismissId(viewId: String?): Boolean {
+        val id = viewId?.substringAfter(":id/")?.lowercase() ?: return false
+        if (listOf("reject", "refuse", "decline", "hang", "end_call", "endcall", "accept", "answer").any { id.contains(it) }) return false
+        return id.contains("dismiss")
+    }
+
     fun durationSeconds(text: String): Long? {
         if (!isDuration(text)) return null
         val parts = text.trim().split(':').map { it.toLong() }
@@ -124,10 +134,12 @@ object CallScreenText {
             clean.firstOrNull { n -> n.viewId != null && n.viewId.contains(k) && accept(n.text) }?.text
         }
 
-        val idName = byId("name", "caller", "contact") { t ->
+        // BYD (com.byd.bluetoothcall, araçta 25.11.2026): `float_phone_num` kişi kayıtlıysa ADI,
+        // `float_locale` numarayı taşıyor. Kimlikler adına güvenilmez; biçime göre süzülür.
+        val idName = byId("name", "caller", "contact", "phone_num") { t ->
             !isNumber(t) && !isDuration(t) && phaseOf(t) == null && t.lowercase() !in buttonWords
         }
-        val idNumber = byId("number", "phone_num", "phonenum", "tel")?.takeIf { isNumber(it) }
+        val idNumber = byId("number", "phone_num", "phonenum", "tel", "locale") { isNumber(it) }
         val idTime = byId("time", "duration", "timer", "chronometer")?.let { durationSeconds(it) }
         val idState = byId("state", "status")?.let { phaseOf(it) }
 

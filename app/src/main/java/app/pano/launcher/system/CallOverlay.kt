@@ -1,6 +1,7 @@
 package app.pano.launcher.system
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.Rect
@@ -73,6 +74,8 @@ import kotlin.math.min
  */
 object CallOverlay {
     private const val TAG = "CallOverlay"
+    private const val PREFS = "pano_call"
+    private const val KEY_DIALOG = "incoming_dialog_rect"
 
     /** Arama penceresi açan paketler: BYD ve (emülatörde deneme için) Android'in çeviricisi. */
     private val CALL_PACKAGES = setOf(
@@ -111,7 +114,9 @@ object CallOverlay {
     private var gaveUpPushing = false
     /** Arama penceresinin etkinlik olmayan (diyalog) penceresinin yeri; yoksa null. */
     private var dialogRect: Rect? = null
-    private var loggedTree = false
+    /** Bu aramada loglanmış pencere düzenleri (görünüm kimlikleri kümesi). */
+    private val loggedTrees = HashSet<Set<String>>()
+    private var lastDismiss = 0L
 
     private val pollRunnable = object : Runnable {
         override fun run() {
@@ -163,8 +168,32 @@ object CallOverlay {
         }
     }
 
+    /**
+     * Erişilebilirlik olayı: pencere listesi değişti. BYD'nin gelen arama penceresi odak almadığı için
+     * yalnızca bununla duyulur; 500 ms'lik taramayı beklemeden hemen örtülür (yoksa bir an görünüyordu).
+     */
+    fun onWindowsChanged() {
+        if (service == null) return
+        if (live()) { scan(); return }
+        // Pencere HFP olayından önce açıldı: arama durumu hemen okunur, gelince tarama başlar.
+        if (callWindows().isNotEmpty()) CallHub.refresh()
+    }
+
+    /** BYD'nin gelen arama penceresinin son görülen yeri: bir sonraki aramada kart baştan oraya açılır. */
+    private fun rememberedDialog(): Rect? {
+        val p = service?.getSharedPreferences(PREFS, Context.MODE_PRIVATE) ?: return null
+        val v = p.getString(KEY_DIALOG, null) ?: return null
+        return runCatching { Rect.unflattenFromString(v) }.getOrNull()?.takeIf { !it.isEmpty }
+    }
+
+    private fun rememberDialog(r: Rect) {
+        if (r.isEmpty || r == rememberedDialog()) return
+        service?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()?.putString(KEY_DIALOG, r.flattenToString())?.apply()
+    }
+
     private fun onCallStarted() {
-        loggedTree = false
+        loggedTrees.clear()
+        lastDismiss = 0L
         gaveUpPushing = false
         pushes.clear()
         handler.removeCallbacks(pollRunnable)
@@ -239,6 +268,7 @@ object CallOverlay {
         if (service == null || !live()) return
         val windows = callWindows()
         var dialog: Rect? = null
+        var dismiss: AccessibilityNodeInfo? = null
         val texts = ArrayList<CallScreenText.Node>()
         for ((w, root) in windows) {
             val nodes = ArrayList<AccessibilityNodeInfo>().also { collect(root, it) }
@@ -246,13 +276,17 @@ object CallOverlay {
                 val t = (n.text ?: n.contentDescription)?.toString()
                 if (!t.isNullOrBlank()) texts += CallScreenText.Node(n.viewIdResourceName, t)
             }
-            if (!loggedTree) logTree(w, nodes)
+            // Pencerenin düzeni değişince (gelen arama → görüşme) ağaç yeniden loglanır.
+            val ids = nodes.mapNotNull { it.viewIdResourceName }.toSet()
+            if (ids !in loggedTrees) { loggedTrees += ids; logTree(w, nodes) }
             val b = Rect().also { w.getBoundsInScreen(it) }
             val screen = screenSize()
             val small = b.width() * b.height() < screen.first * screen.second * 0.7f
-            if (w.type != AccessibilityWindowInfo.TYPE_APPLICATION || small) dialog = b
+            if (w.type != AccessibilityWindowInfo.TYPE_APPLICATION || small) {
+                dialog = b
+                dismiss = dismiss ?: nodes.firstOrNull { n -> CallScreenText.isDismissId(n.viewIdResourceName) }
+            }
         }
-        if (windows.isNotEmpty()) loggedTree = true
         // Öndeki uygulama değişince her zaman "etkinlik" olayı gelmiyor (görev öne alınınca olayın sınıfı
         // kök görünüm olabiliyor): arama ekranının görünüp görünmediğine pencere listesinden bakılır.
         val fullCallWindow = windows.any { (w, _) ->
@@ -265,9 +299,25 @@ object CallOverlay {
             callActivityFront = false
             evaluate()
         }
+        var parsed: CallScreenText.Parsed? = null
         if (texts.isNotEmpty()) {
-            val parsed = CallScreenText.parse(texts)
+            parsed = CallScreenText.parse(texts)
             if (!parsed.isEmpty) CallHub.onScreen(parsed)
+        }
+        // Yalnızca gelen arama penceresinin yeri hatırlanır (giden aramadaki pencere başka yerde, büyük).
+        if (call.value?.phase == CallPhase.Incoming) dialog?.let { rememberDialog(it) }
+        // BYD'nin küçük penceresi kendi "gizle" düğmesiyle kapatılır: ad ve numara okunduktan sonra
+        // (pencere gidince ad da gider), aynı pencere için en çok 1,5 sn'de bir.
+        val known = parsed?.let { it.name != null || it.number != null } == true || CallHub.state.value?.number != null
+        dismiss?.let { d ->
+            val now = SystemClock.uptimeMillis()
+            if (known && now - lastDismiss > 1500) {
+                lastDismiss = now
+                var target: AccessibilityNodeInfo? = d
+                while (target != null && !target.isClickable) target = target.parent
+                val ok = (target ?: d).performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                Log.i(TAG, "BYD penceresi gizlendi (${d.viewIdResourceName}) → $ok")
+            }
         }
         if (dialog != dialogRect) { dialogRect = dialog; evaluate() }
     }
@@ -326,11 +376,16 @@ object CallOverlay {
         val c = call.value
         val ufuk = PanoSettings.state.value.layout == LayoutStyle.Ufuk
         val panoFront = ForegroundApp.pkg.value == s.packageName && ufuk
+        // Gelen aramada BYD penceresi henüz bulunmadıysa son görüldüğü yer örtülür: pencere bir an
+        // görünmez, kart da açıldıktan sonra yer değiştirmez.
+        // Arama bitince BYD penceresi de kapanır: "Arama bitti" kartı onun boş alanını örtmesin.
+        val cover = if (c?.phase == CallPhase.Ended) null
+            else dialogRect ?: if (c?.phase == CallPhase.Incoming) rememberedDialog() else null
         val newMode = when {
             c == null -> Mode.None
             // Bitti: kartı çizen yer onu kısa süre "Arama bitti" ile gösterir.
             callActivityFront -> Mode.Full
-            dialogRect != null -> Mode.Cover
+            cover != null -> Mode.Cover
             panoFront -> Mode.None
             else -> Mode.Corner
         }
@@ -340,7 +395,7 @@ object CallOverlay {
         val margin = (24 * k).toInt()
         val newRect = when (newMode) {
             Mode.Full -> Rect(0, 0, sw, sh)
-            Mode.Cover -> dialogRect!!.let { d ->
+            Mode.Cover -> cover!!.let { d ->
                 val w = maxOf(d.width(), cardW)
                 val left = d.left.coerceIn(0, (sw - w).coerceAtLeast(0))
                 Rect(left, d.top, left + w, d.bottom)

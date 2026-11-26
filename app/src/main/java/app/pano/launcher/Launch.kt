@@ -165,6 +165,9 @@ object Launch {
     /** Aracın kendi ayarları (BYD'de alt çubuktaki dişli); yoksa Android ayarları. */
     private val CAR_SETTINGS_APPS = listOf("com.byd.carsettings")
 
+    /** Aracın kendi ayar uygulaması var mı (BYD). Döndürme düğmesi de buna bağlı: ikisi de BYD'ye özgü. */
+    fun hasCarSettings(context: Context): Boolean = CAR_SETTINGS_APPS.any { isInstalled(context, it) }
+
     fun carSettings(context: Context) {
         val launch = launchable(context, CAR_SETTINGS_APPS)
         if (launch != null) start(context, launch, "Araç ayarları açılamadı") else settings(context)

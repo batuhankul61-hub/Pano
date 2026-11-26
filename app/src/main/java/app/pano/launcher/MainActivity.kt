@@ -40,6 +40,12 @@ import app.pano.launcher.weather.WeatherHub
 enum class Screen { Home, Climate, Apps, Settings }
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** Pano'nun ekranı görünür (onStart–onStop arası); alt şerit o zaman uygulamaların üstünde değil. */
+        @Volatile var isStarted = false
+            private set
+    }
+
     private val screen = mutableStateOf(Screen.Home)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -104,6 +110,7 @@ class MainActivity : ComponentActivity() {
     /** Pano öne gelince kendi alt şeridi var; uygulamaların üstündeki kopya kalkar. */
     override fun onStart() {
         super.onStart()
+        isStarted = true
         // Ses tuşları ve şerit için hizmet bağlı olmalı (güncellemeden sonra kendiliğinden bağlanmayabiliyor).
         if (app.pano.launcher.system.PanoAccessibility.instance == null) app.pano.launcher.system.SystemActions.enableOwnService(this)
         app.pano.launcher.system.BarOverlay.hide()
@@ -112,6 +119,7 @@ class MainActivity : ComponentActivity() {
     /** Pano arkaya düştü (başka bir uygulama açıldı): alt şerit o uygulamanın üstünde kalır. */
     override fun onStop() {
         super.onStop()
+        isStarted = false
         if (!isChangingConfigurations) app.pano.launcher.system.BarOverlay.show(this)
     }
 

@@ -11,6 +11,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableLongStateOf
@@ -42,6 +43,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -890,6 +892,7 @@ private fun BottomBar(
     fun toggle(target: Screen) = onNavigate(if (screen == target) Screen.Home else target)
     val openClimate = { toggle(Screen.Climate) }
     val edge = c.hairline
+    val byd = remember { Launch.hasCarSettings(context) }
 
     Row(
         modifier.background(c.background).drawBehind {
@@ -921,6 +924,11 @@ private fun BottomBar(
             BarApp(PanoIcons.Fan, "Klima", active = panel == UfukPanel.Climate) { openClimate() }
             BarApp(PanoIcons.Apps, "Uygulamalar", active = panel == UfukPanel.Apps, dimmed = locked) { toggle(Screen.Apps) }
             BarApp(PanoIcons.Sliders, "Ayarlar", active = panel == UfukPanel.Settings, dimmed = locked) { toggle(Screen.Settings) }
+            // BYD'nin alt çubuğundaki araç ayarları ve ekranı döndürme; yalnızca BYD'de.
+            if (byd) {
+                BarApp(PanoIcons.Car, "Araç ayarları") { Launch.carSettings(context) }
+                BarApp(PanoIcons.Rotate, "Ekranı döndür") { app.pano.launcher.system.SystemActions.rotate(context) }
+            }
         }
         if (climate.dualZone) {
             BarTemp(
@@ -1038,18 +1046,29 @@ private fun PlayingBars(color: Color, modifier: Modifier) {
 // ───────────────────────── Uygulamaların üstündeki şerit ─────────────────────────
 
 /** Şeridin üstünde açılan küçük pencere. Aynı anda biri. */
-internal enum class OverlayPopup { Climate, Volume }
+internal enum class OverlayPopup { Climate, Volume, Quick }
 
 /** Uygulamaların üstündeki şeridin durumu; [app.pano.launcher.system.BarOverlay] dışarı dokununca kapatır. */
 internal object UfukOverlayState {
     var popup by mutableStateOf<OverlayPopup?>(null)
+    /** Şerit aşağı kaydırılıp gizlendi; altta yalnızca tutamaç kalır. Şerit her gösterilişinde açık başlar. */
+    var collapsed by mutableStateOf(false)
     fun dismiss() { popup = null }
 }
+
+/** Şerit gizliyken alttaki tutamacın yüksekliği (tasarım birimi); dokunma/kaydırma alanı. */
+private val OverlayHandleHeight = 36.dp
+/**
+ * Tutamacın genişliği; pencere de bu kadar daralır, ortada durur. Tam genişlik olsaydı şeridin
+ * altında kalan uygulama düğmelerini (ör. NewPipe'ın mini oynatıcısı) örterdi.
+ */
+private val OverlayHandleWidth = 360.dp
 
 /** Şeridin üstünde, açılan pencere için ayrılan yükseklik (tasarım birimi). */
 private fun popupHeight(p: OverlayPopup?): Dp = when (p) {
     OverlayPopup.Climate -> 252.dp
     OverlayPopup.Volume -> 116.dp
+    OverlayPopup.Quick -> 640.dp
     null -> 0.dp
 }
 
@@ -1065,7 +1084,13 @@ private fun popupHeight(p: OverlayPopup?): Dp = when (p) {
  * [scale]: tasarım tuvalinin (1600 birim genişlik) ekrandaki ölçeği; Pano'daki şeritle aynı boy.
  */
 @Composable
-fun UfukOverlayBar(scale: Float, onOpen: (Screen) -> Unit, onHeight: (designHeight: Float?) -> Unit) {
+fun UfukOverlayBar(
+    scale: Float,
+    onOpen: (Screen) -> Unit,
+    onHeight: (designHeight: Float?) -> Unit,
+    /** Pencere genişliği (tasarım birimi; null = tüm genişlik). Yalnızca gizli şeridin tutamacı dar. */
+    onWidth: (designWidth: Float?) -> Unit,
+) {
     val context = LocalContext.current
     val climate = remember { app.pano.launcher.vehicle.ClimateStore.load(context) }
     val volume = rememberUfukVolume()
@@ -1078,10 +1103,23 @@ fun UfukOverlayBar(scale: Float, onOpen: (Screen) -> Unit, onHeight: (designHeig
         delay(VolumeHudMs)
         if (UfukOverlayState.popup == OverlayPopup.Volume) UfukOverlayState.dismiss()
     }
+    val collapsed = UfukOverlayState.collapsed
+    // Pencere yalnızca tutamaç boyuna inmiş (gizleme kayması bitti).
+    var handleOnly by remember { mutableStateOf(false) }
     // Pencere açılırken hemen büyür; kapanırken kayma bitince şerit boyuna iner (dokunuşlar yine uygulamaya).
-    LaunchedEffect(popup) {
-        if (popup == null) delay(UfukMotionMs.toLong())
-        onHeight(if (popup == OverlayPopup.Climate) null else OverlayBarHeight.value + popupHeight(popup).value)
+    // Şerit gizlenince kayma bitince tutamaç boyuna iner; geri açılırken hemen büyür.
+    LaunchedEffect(popup, collapsed) {
+        if (collapsed) {
+            delay(UfukMotionMs.toLong())
+            onWidth(OverlayHandleWidth.value)
+            onHeight(OverlayHandleHeight.value)
+            handleOnly = true
+            return@LaunchedEffect
+        }
+        if (popup == null && !handleOnly) delay(UfukMotionMs.toLong())
+        handleOnly = false
+        onWidth(null)
+        onHeight(if (popup.coversApp()) null else OverlayBarHeight.value + popupHeight(popup).value)
     }
     DisposableEffect(Unit) { onDispose { UfukOverlayState.dismiss() } }
 
@@ -1089,9 +1127,17 @@ fun UfukOverlayBar(scale: Float, onOpen: (Screen) -> Unit, onHeight: (designHeig
     androidx.compose.runtime.CompositionLocalProvider(
         LocalDensity provides androidx.compose.ui.unit.Density(density.density * scale, 1f),
     ) {
+        // Gizlenirken şerit aşağı kayar, açılırken aşağıdan gelir.
+        val slide by animateFloatAsState(
+            if (collapsed) 1f else 0f, tween(UfukMotionMs), label = "şerit kayması",
+        )
+        if (collapsed && handleOnly) {
+            OverlayHandle(Modifier.fillMaxSize()) { UfukOverlayState.collapsed = false }
+            return@CompositionLocalProvider
+        }
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
             // Kartın dışındaki alan: dokununca kart kapanır. Klima açıkken uygulama hafifçe kararır.
-            val scrim by animateFloatAsState(if (popup == OverlayPopup.Climate) 1f else 0f, tween(UfukMotionMs), label = "karartma")
+            val scrim by animateFloatAsState(if (popup.coversApp()) 1f else 0f, tween(UfukMotionMs), label = "karartma")
             Box(
                 Modifier.fillMaxWidth().weight(1f)
                     .drawBehind { if (scrim > 0f) drawRect(Color.Black.copy(alpha = 0.32f * scrim)) }
@@ -1114,16 +1160,56 @@ fun UfukOverlayBar(scale: Float, onOpen: (Screen) -> Unit, onHeight: (designHeig
                 ) {
                     VolumeHudBody(volume, Modifier.swallowTaps(), edge = overlayEdgeColor(LocalPano.current))
                 }
+                androidx.compose.animation.AnimatedVisibility(
+                    popup == OverlayPopup.Quick,
+                    enter = fadeIn(tween(UfukMotionMs / 2)) + slideInVertically(tween(UfukMotionMs)) { it },
+                    exit = fadeOut(tween(UfukMotionMs)) + slideOutVertically(tween(UfukMotionMs)) { it },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                ) {
+                    OverlayQuickCard { UfukOverlayState.dismiss() }
+                }
             }
             OverlayStrip(
-                climate, volume, Modifier.fillMaxWidth().height(OverlayBarHeight),
+                climate, volume,
+                Modifier.fillMaxWidth().height(OverlayBarHeight)
+                    .graphicsLayer { translationY = slide * size.height }
+                    .swipeDownToHide(),
                 climateOpen = popup == OverlayPopup.Climate,
+                quickOpen = popup == OverlayPopup.Quick,
                 onOpen = onOpen,
                 onClimate = {
                     UfukOverlayState.popup = if (UfukOverlayState.popup == OverlayPopup.Climate) null else OverlayPopup.Climate
                 },
+                onQuick = {
+                    UfukOverlayState.popup = if (UfukOverlayState.popup == OverlayPopup.Quick) null else OverlayPopup.Quick
+                },
             )
         }
+    }
+}
+
+/** Uygulamanın üstünü kaplayan (pencere tüm ekran, uygulama hafifçe kararır) açılır kartlar. */
+private fun OverlayPopup?.coversApp(): Boolean = this == OverlayPopup.Climate || this == OverlayPopup.Quick
+
+/**
+ * Şeridin üstünde açılan hızlı ayarlar kartı: Pano'daki kartın aynısı ([QuickSettingsScreen]),
+ * uygulamadan çıkmadan. Parlaklık, tema, ekranı kapat, bağlantılar, koltuk/direksiyon.
+ */
+@Composable
+private fun OverlayQuickCard(onClose: () -> Unit) {
+    val c = LocalPano.current
+    val shape = RoundedCornerShape(28.dp)
+    Column(
+        // İçeriği kadar uzar (koltuk/direksiyon satırları araca göre var ya da yok); sığmazsa kayar.
+        Modifier.width(1000.dp).heightIn(max = popupHeight(OverlayPopup.Quick) - 24.dp).swallowTaps()
+            .clip(shape).background(c.card).border(2.dp, overlayEdgeColor(c), shape)
+            .padding(start = 24.dp, end = 16.dp, top = 12.dp, bottom = 20.dp),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Hızlı ayarlar", color = c.text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            RoundIconButton(PanoIcons.Close, "Kapat", onClose, c.raised, c.text, size = 64.dp, iconSize = 24.dp)
+        }
+        QuickSettingsScreen(Modifier.weight(1f, fill = false).padding(end = 8.dp), onClose = onClose)
     }
 }
 
@@ -1135,12 +1221,13 @@ fun UfukOverlayBar(scale: Float, onOpen: (Screen) -> Unit, onHeight: (designHeig
 @Composable
 private fun OverlayStrip(
     climate: ClimateState, volume: UfukVolume, modifier: Modifier,
-    climateOpen: Boolean, onOpen: (Screen) -> Unit, onClimate: () -> Unit,
+    climateOpen: Boolean, quickOpen: Boolean, onOpen: (Screen) -> Unit, onClimate: () -> Unit, onQuick: () -> Unit,
 ) {
     val c = LocalPano.current
     val context = LocalContext.current
     val playing by MediaHub.state.collectAsState()
     val edge = overlayEdgeColor(c)
+    val byd = remember { app.pano.launcher.Launch.hasCarSettings(context) }
     Row(
         modifier.background(overlayBarColor(c))
             .drawBehind { drawRect(edge, size = androidx.compose.ui.geometry.Size(size.width, 3.dp.toPx())) }
@@ -1164,6 +1251,13 @@ private fun OverlayStrip(
             // Telefon kartı Pano'da açılır (kendi telefon ekranımız).
             BarApp(PanoIcons.Phone, "Telefon", compact = true) { AppSheet.openPhone(); onOpen(Screen.Home) }
             BarApp(PanoIcons.Fan, "Klima", active = climateOpen, compact = true) { onClimate() }
+            // Hızlı ayarlar uygulamadan çıkmadan şeridin üstünde açılır (Pano'daki kartın aynısı).
+            BarApp(PanoIcons.Toggles, "Hızlı ayarlar", active = quickOpen, compact = true) { onQuick() }
+            // BYD'nin alt çubuğundaki araç ayarları ve ekranı döndürme; yalnızca BYD'de.
+            if (byd) {
+                BarApp(PanoIcons.Car, "Araç ayarları", compact = true) { app.pano.launcher.Launch.carSettings(context) }
+                BarApp(PanoIcons.Rotate, "Ekranı döndür", compact = true) { app.pano.launcher.system.SystemActions.rotate(context) }
+            }
         }
         if (climate.dualZone) {
             BarTemp(
@@ -1174,6 +1268,49 @@ private fun OverlayStrip(
         }
         Box(Modifier.padding(horizontal = 10.dp).width(1.dp).height(36.dp).background(edge))
         VolumeControl(volume, compact = true)
+    }
+}
+
+/** Şeridi aşağı kaydırmak onu gizler (açık pencere de kapanır). Düğmelere dokunmak etkilenmez. */
+private fun Modifier.swipeDownToHide(): Modifier = pointerInput(Unit) {
+    var dragged = 0f
+    detectVerticalDragGestures(
+        onDragStart = { dragged = 0f },
+        onVerticalDrag = { _, dy -> dragged += dy },
+        onDragEnd = {
+            if (dragged > 24.dp.toPx()) {
+                UfukOverlayState.dismiss()
+                UfukOverlayState.collapsed = true
+            }
+        },
+    )
+}
+
+/**
+ * Şerit gizliyken ekranın altındaki ince tutamaç: ortada kısa bir çizgi. Dokunmak ya da yukarı
+ * kaydırmak şeridi geri getirir; tüm genişlik dokunma alanıdır (uygulamalar bu yere çizmiyor).
+ */
+@Composable
+private fun OverlayHandle(modifier: Modifier, onShow: () -> Unit) {
+    val c = LocalPano.current
+    Box(
+        modifier
+            .semantics { contentDescription = "Alt şeridi göster" }
+            .pointerInput(Unit) { detectTapGestures { onShow() } }
+            .pointerInput(Unit) {
+                var dragged = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { dragged = 0f },
+                    onVerticalDrag = { _, dy -> dragged += dy },
+                    onDragEnd = { if (dragged < -8.dp.toPx()) onShow() },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.width(160.dp).height(8.dp).clip(RoundedCornerShape(4.dp))
+                .background(c.text.copy(alpha = 0.45f)),
+        )
     }
 }
 

@@ -110,7 +110,12 @@ private const val QuickPollMs = 1_000L
 private const val QuickSettleMs = 2_500L
 
 @Composable
-fun QuickSettingsScreen(modifier: Modifier = Modifier, onClose: () -> Unit) {
+fun QuickSettingsScreen(
+    modifier: Modifier = Modifier,
+    /** false: kendisi kaydırmaz, içeriği kadar uzar (Ayarlar › Genel gibi kaydırılan bir sayfanın içinde). */
+    scroll: Boolean = true,
+    onClose: () -> Unit,
+) {
     val c = LocalPano.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -136,7 +141,8 @@ fun QuickSettingsScreen(modifier: Modifier = Modifier, onClose: () -> Unit) {
     }
 
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        // Yüksekliği içeriği kadar (kayarken de); şeridin üstündeki kart buna göre kısalır.
+        if (scroll) modifier.fillMaxWidth().verticalScroll(rememberScrollState()) else modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // ── Ekran ──
@@ -148,7 +154,8 @@ fun QuickSettingsScreen(modifier: Modifier = Modifier, onClose: () -> Unit) {
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            QuickCard(Modifier.weight(2f)) {
+            // Ayarlar'ın içindeki daha dar alanda "Ekranı kapat" kesilmesin diye tema kartı biraz daralır.
+            QuickCard(Modifier.weight(if (scroll) 2f else 1.3f)) {
                 CardLabel(PanoIcons.Moon, "Tema", modifier = Modifier.padding(bottom = 12.dp))
                 val theme = LocalStyle.current.theme
                 QuickSegmented(ThemeMode.entries.map { it.label }, theme.ordinal, enabled = true) { i ->

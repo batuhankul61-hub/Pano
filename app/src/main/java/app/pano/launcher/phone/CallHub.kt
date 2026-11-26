@@ -115,6 +115,9 @@ object CallHub {
         refreshHfp()
     }
 
+    /** Arama penceresi HFP olayından önce açıldıysa durumu hemen yeniden okur (CallOverlay çağırır). */
+    fun refresh() { main.post { refreshHfp() } }
+
     private fun refreshHfp() {
         val calls = if (HfpClient.available) HfpClient.calls() else emptyList()
         val c = calls.firstOrNull { it.phase == CallPhase.Incoming }

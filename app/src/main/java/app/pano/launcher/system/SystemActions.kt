@@ -108,6 +108,8 @@ class PanoAccessibility : AccessibilityService() {
         VolumeHudOverlay.attach(this)
         // Görüşmede BYD'nin arama penceresi yerine Pano'nun kartı.
         CallOverlay.attach(this)
+        // Süreç yeniden başladıysa (güncelleme vb.) kalmış alt boşluğu toparla, şeridi geri getir.
+        BarOverlay.restoreAfterRestart(this)
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -127,6 +129,8 @@ class PanoAccessibility : AccessibilityService() {
             ForegroundApp.onWindowChanged(this, event.packageName?.toString(), event.className?.toString())
             CallOverlay.onWindowChanged(event.packageName?.toString(), event.className?.toString())
         }
+        // Odaklanmayan pencereler (BYD'nin gelen arama penceresi) yalnızca bu olayla duyulur.
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) CallOverlay.onWindowsChanged()
     }
     override fun onInterrupt() {}
 

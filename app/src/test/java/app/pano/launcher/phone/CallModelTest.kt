@@ -71,6 +71,32 @@ class CallModelTest {
         assertEquals(3725L, CallScreenText.durationSeconds("1:02:05"))
     }
 
+    @Test fun bydYuzenPencere() {
+        // Araçta okunan BYD gelen arama penceresi: ad "phone_num" kimliğinde, numara "locale"de.
+        val bekleyen = listOf(
+            Node("com.byd.bluetoothcall:id/float_phone_num", "Ayşe Yılmaz"),
+            Node("com.byd.bluetoothcall:id/float_locale", "+90 532 123 45 67"),
+            // Yazıdan tahmini bozacak ikinci bir aday: ad yine kimlikten gelmeli.
+            Node(null, "Mobil"),
+        )
+        val p = CallScreenText.parse(bekleyen)
+        assertEquals("Ayşe Yılmaz", p.name)
+        assertEquals("+90 532 123 45 67", p.number)
+
+        // Rehberde yoksa BYD ad yerine numarayı yazar: ad uydurulmaz.
+        val kayitsiz = CallScreenText.parse(listOf(Node("com.byd.bluetoothcall:id/float_phone_num", "+90 532 123 45 67")))
+        assertNull(kayitsiz.name)
+        assertEquals("+90 532 123 45 67", kayitsiz.number)
+    }
+
+    @Test fun gizleDugmesi() {
+        assertTrue(CallScreenText.isDismissId("com.byd.bluetoothcall:id/float_screen_dismiss_btn"))
+        assertFalse(CallScreenText.isDismissId("com.byd.bluetoothcall:id/float_incoming_reject_btn"))
+        assertFalse(CallScreenText.isDismissId("com.byd.bluetoothcall:id/float_incoming_accept_btn"))
+        assertFalse(CallScreenText.isDismissId("x:id/dismiss_and_hangup"))
+        assertFalse(CallScreenText.isDismissId(null))
+    }
+
     @Test fun durumKimligiAdSanilmaz() {
         // Android çeviricisinde durum yazısının kimliği de "contact" içeriyor.
         val p = CallScreenText.parse(
