@@ -54,22 +54,39 @@ fun ClimateScreen(climate: ClimateState, onBack: () -> Unit) {
             }
         }
 
-        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            // Tek bölgeli klimada tek sıcaklık paneli; koltuk ısıtma yalnızca araçta varsa.
+        // Tek bölgeli klimada tek sıcaklık paneli; koltuk ısıtma yalnızca araçta varsa.
+        val driver: @Composable (Modifier) -> Unit = { m ->
             ZonePanel(
                 title = if (climate.dualZone) "Sürücü" else "Kabin", temp = climate.driver,
                 onDown = { climate.changeDriver(-0.5f) }, onUp = { climate.changeDriver(0.5f) },
                 seat = climate.driverSeat.takeIf { climate.seatHeating }, onSeat = { climate.driverSeat = it },
-                badge = null, modifier = Modifier.weight(1f).fillMaxHeight(),
+                badge = null, modifier = m,
             )
-            CenterPanel(climate, Modifier.weight(1.25f).fillMaxHeight())
-            if (climate.dualZone) {
-                ZonePanel(
-                    title = "Yolcu", temp = climate.passenger,
-                    onDown = { climate.changePassenger(-0.5f) }, onUp = { climate.changePassenger(0.5f) },
-                    seat = climate.passengerSeat.takeIf { climate.seatHeating }, onSeat = { climate.passengerSeat = it },
-                    badge = if (climate.sync) "Senkron" else null, modifier = Modifier.weight(1f).fillMaxHeight(),
-                )
+        }
+        val passenger: @Composable (Modifier) -> Unit = { m ->
+            ZonePanel(
+                title = "Yolcu", temp = climate.passenger,
+                onDown = { climate.changePassenger(-0.5f) }, onUp = { climate.changePassenger(0.5f) },
+                seat = climate.passengerSeat.takeIf { climate.seatHeating }, onSeat = { climate.passengerSeat = it },
+                badge = if (climate.sync) "Senkron" else null, modifier = m,
+            )
+        }
+
+        if (LocalPortrait.current) {
+            // Dikey ekranda (Ufuk) üç sütun 900 birimlik ene sığmıyordu (karolar ve "Kapalı" eziliyordu):
+            // bölgeler üstte yan yana, ortadaki panel altta tam genişlikte.
+            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    driver(Modifier.weight(1f).fillMaxHeight())
+                    if (climate.dualZone) passenger(Modifier.weight(1f).fillMaxHeight())
+                }
+                CenterPanel(climate, Modifier.weight(1f).fillMaxWidth())
+            }
+        } else {
+            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                driver(Modifier.weight(1f).fillMaxHeight())
+                CenterPanel(climate, Modifier.weight(1.25f).fillMaxHeight())
+                if (climate.dualZone) passenger(Modifier.weight(1f).fillMaxHeight())
             }
         }
     }
