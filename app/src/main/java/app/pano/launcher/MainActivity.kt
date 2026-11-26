@@ -169,7 +169,7 @@ fun PanoApp(screen: Screen, onNavigate: (Screen) -> Unit) {
             }
             // WhatsApp / SMS mesajları her iki düzenin üstünde kısa bir banner olarak görünür.
             if (layout == LayoutStyle.Ufuk) {
-                app.pano.launcher.ui.MessageBanner(app.pano.launcher.ui.UfukBannerArea.start, app.pano.launcher.ui.UfukBannerArea.end)
+                app.pano.launcher.ui.MessageBanner(app.pano.launcher.ui.UfukBannerArea.start, app.pano.launcher.ui.UfukBannerArea.end, app.pano.launcher.ui.UfukBannerArea.top, portraitAware = true)
             } else {
                 app.pano.launcher.ui.MessageBanner()
             }

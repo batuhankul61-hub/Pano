@@ -20,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,15 +47,37 @@ import app.pano.launcher.ui.theme.onActiveColor
 import kotlin.math.min
 
 /**
+ * İçerik dikey tuvalde mi çiziliyor? Yalnızca `portraitAware` bir [DesignCanvas] içinde ve ekran
+ * dikeyken `true`. Düzenler buna bakıp yerleşimi değiştirir.
+ */
+val LocalPortrait = staticCompositionLocalOf { false }
+
+/**
  * Tasarım 1600×900 birimlik bir tuval üzerinde çizildi. Bu sarmalayıcı, ekran ne olursa olsun
  * o tuvali ekrana sığacak şekilde ölçekler; böylece ölçüler tasarımdakiyle birebir kalır.
+ *
+ * `portraitAware` açıksa ve alan dikeyse (boy > en) tuval tersine döner (900×1600): araçta ekran
+ * döndürülünce yatay tasarım ekranın üst şeridine küçülmesin (720 px enle ölçek 0,45'e düşüyordu),
+ * ölçüler yine aynı birimde kalsın. İçerik [LocalPortrait] ile bunu öğrenir. Kapalıysa (klasik,
+ * CarPlay) her zaman yatay tuval çizilir ve [LocalPortrait] `false` olur.
  */
 @Composable
-fun DesignCanvas(designWidth: Float = 1600f, designHeight: Float = 900f, content: @Composable () -> Unit) {
+fun DesignCanvas(
+    designWidth: Float = 1600f,
+    designHeight: Float = 900f,
+    portraitAware: Boolean = false,
+    content: @Composable () -> Unit,
+) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val scale = min(maxWidth.value / designWidth, maxHeight.value / designHeight)
+        val portrait = portraitAware && maxHeight > maxWidth
+        val w = if (portrait) designHeight else designWidth
+        val h = if (portrait) designWidth else designHeight
+        val scale = min(maxWidth.value / w, maxHeight.value / h)
         val density = LocalDensity.current
-        CompositionLocalProvider(LocalDensity provides Density(density.density * scale, 1f)) {
+        CompositionLocalProvider(
+            LocalDensity provides Density(density.density * scale, 1f),
+            LocalPortrait provides portrait,
+        ) {
             content()
         }
     }
