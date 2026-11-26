@@ -653,8 +653,8 @@ private fun AccentPicker(selected: AccentChoice) {
 }
 
 /**
- * Pano'nun kendini güncellemesi: GitHub erişim anahtarı (yalnızca okuma), "Denetle" ve varsa
- * "Güncelle". Kurulum Android'in yükleyicisiyle olur; kullanıcı ekranda onaylar.
+ * Pano'nun kendini güncellemesi: "Denetle" ve varsa "Güncelle"; isteğe bağlı GitHub erişim anahtarı
+ * (depo herkese açık, anahtarsız da çalışır). Kurulum Android'in yükleyicisiyle olur; kullanıcı onaylar.
  */
 @Composable
 private fun UpdateSettings() {
@@ -669,15 +669,15 @@ private fun UpdateSettings() {
     var draft by remember { mutableStateOf("") }
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
 
-    // Ayarlar açılınca (anahtar varsa) bir kez kendiliğinden denetle.
-    androidx.compose.runtime.LaunchedEffect(hasToken) {
-        if (hasToken && status is app.pano.launcher.update.Updater.Status.Idle) up.check(context)
+    // Ayarlar açılınca bir kez kendiliğinden denetle.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (status is app.pano.launcher.update.Updater.Status.Idle) up.check(context)
     }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp)) {
         Text("Bu sürüm: $VERSION", color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Medium)
         val line = when (val s = status) {
-            app.pano.launcher.update.Updater.Status.Idle -> if (hasToken) "Denetlenmedi" else "GitHub erişim anahtarı yok"
+            app.pano.launcher.update.Updater.Status.Idle -> "Denetlenmedi"
             app.pano.launcher.update.Updater.Status.Checking -> "Denetleniyor…"
             app.pano.launcher.update.Updater.Status.UpToDate -> "Güncel"
             is app.pano.launcher.update.Updater.Status.Available -> "Yeni sürüm var: ${s.release.name}"
@@ -700,7 +700,7 @@ private fun UpdateSettings() {
             }
             SmallButton(
                 "Denetle",
-                enabled = hasToken && s !is app.pano.launcher.update.Updater.Status.Checking &&
+                enabled = s !is app.pano.launcher.update.Updater.Status.Checking &&
                     s !is app.pano.launcher.update.Updater.Status.Downloading,
                 color = colors.text,
             ) { scope.launch { up.check(context) } }
@@ -713,7 +713,7 @@ private fun UpdateSettings() {
         }
 
         Text(
-            if (hasToken) "GitHub erişim anahtarı kayıtlı ($hint)" else "GitHub erişim anahtarı",
+            if (hasToken) "GitHub erişim anahtarı kayıtlı ($hint)" else "GitHub erişim anahtarı (isteğe bağlı)",
             color = colors.text, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 20.dp),
         )
         Row(
@@ -747,8 +747,9 @@ private fun UpdateSettings() {
             if (hasToken) SmallButton("Sil", enabled = true, color = Accent.Red) { up.token.clear(context) }
         }
         Text(
-            "Depo özel olduğu için gerekli. GitHub → Settings → Developer settings → Fine-grained tokens: " +
-                "yalnızca \"Pano\" deposu, Contents: Read-only. Anahtar bu cihazda şifreli saklanır.",
+            "Güncelleme anahtarsız çalışır. Yalnızca GitHub sınıra takılırsa ya da depo özel olursa gerekir: " +
+                "GitHub → Settings → Developer settings → Fine-grained tokens, yalnızca \"Pano\" deposu, " +
+                "Contents: Read-only. Anahtar bu cihazda şifreli saklanır.",
             color = colors.secondary, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 12.dp),
         )
     }

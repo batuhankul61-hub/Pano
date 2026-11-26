@@ -23,13 +23,14 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * Pano'nun kendini güncellemesi: GitHub'daki (özel) `batuhankul61-hub/Pano` deposunun en son
+ * Pano'nun kendini güncellemesi: GitHub'daki `batuhankul61-hub/Pano` deposunun en son
  * sürümüne (Releases) bakar; etiket `v<versionCode>`, eki `.apk`. Daha yeniyse APK'yı indirir ve
  * Android'in kendi yükleyicisiyle (PackageInstaller) üstüne kurar; kullanıcı ekranda onaylar.
  * Aynı release anahtarıyla imzalı olduğu için ayarlar ve veriler korunur.
  *
- * Depo özel olduğundan okumak için yalnızca okuma yetkili bir GitHub erişim anahtarı gerekir
- * (kullanıcı Ayarlar'a girer, cihazda şifreli durur: [token]).
+ * Depo herkese açık: anahtarsız okunur. İsteğe bağlı bir GitHub erişim anahtarı girilirse
+ * (cihazda şifreli durur: [token]) istekler onunla gider; depo yeniden özel yapılırsa ya da
+ * anahtarsız saatlik sınıra (60 istek) takılınırsa işe yarar.
  */
 object Updater {
     private const val TAG = "Updater"
@@ -61,9 +62,9 @@ object Updater {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    private fun request(url: String, tok: String, accept: String) = Request.Builder()
+    private fun request(url: String, tok: String?, accept: String) = Request.Builder()
         .url(url)
-        .header("Authorization", "Bearer $tok")
+        .apply { if (!tok.isNullOrEmpty()) header("Authorization", "Bearer $tok") }
         .header("Accept", accept)
         .header("X-GitHub-Api-Version", "2022-11-28")
         .header("User-Agent", "Pano-launcher")
@@ -72,10 +73,6 @@ object Updater {
     /** En son sürümü sorar; sonuç [status]'ta. */
     suspend fun check(context: Context) {
         val tok = token.get(context)
-        if (tok.isNullOrEmpty()) {
-            _status.value = Status.Failed("Önce GitHub erişim anahtarını gir.")
-            return
-        }
         _status.value = Status.Checking
         _status.value = withContext(Dispatchers.IO) {
             runCatching {
@@ -83,8 +80,15 @@ object Updater {
                     .execute().use { r ->
                         when (r.code) {
                             200 -> {}
-                            401, 403 -> return@runCatching Status.Failed("Erişim anahtarı geçersiz ya da yetkisi yok.")
-                            404 -> return@runCatching Status.Failed("Depoda henüz yayımlanmış sürüm yok.")
+                            401 -> return@runCatching Status.Failed("Erişim anahtarı geçersiz. Sil ya da yenisini gir.")
+                            403, 429 -> return@runCatching Status.Failed(
+                                if (tok.isNullOrEmpty()) "GitHub şimdilik yanıt vermiyor (saatlik sınır). Biraz sonra dene."
+                                else "Erişim anahtarının yetkisi yok.",
+                            )
+                            404 -> return@runCatching Status.Failed(
+                                if (tok.isNullOrEmpty()) "Sürüm bulunamadı (depo özelse erişim anahtarı gir)."
+                                else "Depoda henüz yayımlanmış sürüm yok.",
+                            )
                             else -> return@runCatching Status.Failed("GitHub yanıtı: ${r.code}")
                         }
                         val json = JSONObject(r.body!!.string())
@@ -121,7 +125,7 @@ object Updater {
             }
             return
         }
-        val tok = token.get(app) ?: return
+        val tok = token.get(app)
         val file = File(app.cacheDir, "pano-update.apk")
         _status.value = Status.Downloading(release, 0f)
         val ok = withContext(Dispatchers.IO) {
