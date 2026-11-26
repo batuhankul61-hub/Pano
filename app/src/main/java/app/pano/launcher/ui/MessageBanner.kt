@@ -61,9 +61,11 @@ private const val VISIBLE_MS = 7_000L
  * Ekranın tamamını kaplayan bir katmandır; düzenlerin en üstüne tek satırla eklenir.
  * [start] / [end]: kartın ortalanacağı alanın yanlardan boşluğu (tasarım tuvali birimi); Ufuk'ta
  * kart araç sütununu ve saati örtmesin diye harita alanına sığdırılır, dar alanda kart daralır.
+ * [top]: üstten boşluk; Ufuk dikeydeyken araç başlığını örtmesin diye haritanın başından.
+ * [portraitAware]: dikey düzeni olan yerde (Ufuk) tuval dikey ekranda döner, bkz. [DesignCanvas].
  */
 @Composable
-fun MessageBanner(start: Dp = 0.dp, end: Dp = 0.dp) {
+fun MessageBanner(start: Dp = 0.dp, end: Dp = 0.dp, top: Dp = 0.dp, portraitAware: Boolean = false) {
     val message by MessageHub.state.collectAsState()
     val enabled = LocalStyle.current.showMessages
     // Kayarak çıkarken içerik boşalmasın diye son mesajı tut.
@@ -79,8 +81,8 @@ fun MessageBanner(start: Dp = 0.dp, end: Dp = 0.dp) {
     }
 
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-        DesignCanvas {
-            Box(Modifier.fillMaxSize().padding(start = start, end = end), contentAlignment = Alignment.TopCenter) {
+        DesignCanvas(portraitAware = portraitAware) {
+            Box(Modifier.fillMaxSize().padding(start = start, end = end, top = top), contentAlignment = Alignment.TopCenter) {
                 AnimatedVisibility(
                     visible = enabled && message != null,
                     enter = slideInVertically { -it } + fadeIn(),

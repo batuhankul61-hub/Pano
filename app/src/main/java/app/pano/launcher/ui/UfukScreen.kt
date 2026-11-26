@@ -57,6 +57,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.animation.animateContentSize
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -105,6 +106,7 @@ import app.pano.launcher.vehicle.Gear
 import app.pano.launcher.vehicle.Opening
 import app.pano.launcher.vehicle.Openings
 import app.pano.launcher.vehicle.VehicleHub
+import app.pano.launcher.vehicle.VehicleState
 import app.pano.launcher.vehicle.decimal
 import app.pano.launcher.vehicle.shortTemp
 import app.pano.launcher.weather.WeatherHub
@@ -143,6 +145,15 @@ private const val NavNarrowInset = 0.56f
 
 /** Alt çubuğun yüksekliği. */
 internal val BarHeight = 112.dp
+
+/**
+ * Dikey ekranda alt çubuk iki sıra: üstte sıcaklıklar ve ses, altta uygulamalar. Tek sıra 900
+ * birimlik ene sığmıyordu (uygulamalar sıcaklıkların arasında eziliyordu).
+ */
+private val PortraitBarHeight = 184.dp
+
+/** Dikey başlıkta sağ taraf (menzil, araç görseli, açıklıklar) genişliği. */
+private val PortraitHeaderSideWidth = 320.dp
 /**
  * Uygulamaların üstündeki ince şeridin boyu (tasarım birimi). Uygulamanın altını Pano'daki şeritten
  * az örtsün diye ince; düğmeler yine ≥60 birim (sürüşte dokunulabilir).
@@ -158,6 +169,8 @@ internal object UfukBannerArea {
     var start by mutableStateOf(CarColumnWidth + 24.dp)
     /** Sağdan boşluk: saat/hava kapsülü (genişliği havaya göre değişir) ve iki yanındaki boşluk. */
     var end by mutableStateOf(320.dp)
+    /** Üstten boşluk: dikey ekranda araç başlığının altı (harita orada başlıyor); yatayda 0. */
+    var top by mutableStateOf(0.dp)
 }
 
 /** Sürüşte kısıtlama: araç hareket ediyor **ve** ayarlarda açık. */
@@ -199,26 +212,47 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
         Modifier.fillMaxSize().background(colors.background)
             .then(if (!LocalStyle.current.hideSystemBar) Modifier.windowInsetsPadding(WindowInsets.safeDrawing) else Modifier),
     ) {
-        DesignCanvas {
+        // Dikey ekranda tuval 900×1600 olur (LocalPortrait): araç sütunu üst başlığa, alt çubuk iki sıraya döner.
+        DesignCanvas(portraitAware = true) {
+            val portrait = LocalPortrait.current
             Column(Modifier.fillMaxSize().returnZoom()) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    // Rota seçilince "Nereye?" kartı haritanın sağ yarısına çekilir; rota sol yarıda görünür.
+                    // Rota seçilince "Nereye?" kartı haritanın sağ yarısına (dikeyde alt kısmına) çekilir;
+                    // rota kalan kısımda görünür.
                     val navSession by PanoNav.state.collectAsState()
                     val navNarrow = panel == UfukPanel.Nav && navSession != null
-                    // Sürüşte ya da yönlendirmede sütun daralır; harita yer kazanır.
+                    // Sürüşte ya da yönlendirmede sütun daralır (dikeyde başlık kısalır); harita yer kazanır.
                     val driving by VehicleHub.isDriving.collectAsState()
                     val navActive = navSession?.let { it.phase != NavPhase.Preview && it.route != null } == true
                     val compact = driving || navActive
                     val columnWidth by animateDpAsState(
                         if (compact) CarColumnCompactWidth else CarColumnWidth, tween(UfukMotionMs * 2), label = "araç-sütunu",
                     )
-                    androidx.compose.runtime.SideEffect { UfukBannerArea.start = columnWidth + 24.dp }
-                    Row(Modifier.fillMaxSize()) {
-                        CarColumn(compact, Modifier.width(columnWidth).fillMaxHeight())
-                        MapCanvas(Modifier.weight(1f).fillMaxHeight(), endInset = if (navNarrow) NavNarrowInset else 0f)
+                    // Dikey başlığın ölçülen boyu: kartlar, banner ve görüşme kartı haritanın üstünden başlar.
+                    val density = LocalDensity.current
+                    var headerHeight by remember { mutableStateOf(0.dp) }
+                    val mapTop = if (portrait) headerHeight else 0.dp
+                    androidx.compose.runtime.SideEffect {
+                        UfukBannerArea.start = if (portrait) 24.dp else columnWidth + 24.dp
+                        UfukBannerArea.top = mapTop
+                    }
+                    if (portrait) {
+                        Column(Modifier.fillMaxSize()) {
+                            CarHeader(
+                                compact,
+                                Modifier.fillMaxWidth().animateContentSize(tween(UfukMotionMs * 2))
+                                    .onSizeChanged { headerHeight = with(density) { it.height.toDp() } },
+                            )
+                            MapCanvas(Modifier.weight(1f).fillMaxWidth(), endInset = 0f, bottomInset = if (navNarrow) NavNarrowInset else 0f)
+                        }
+                    } else {
+                        Row(Modifier.fillMaxSize()) {
+                            CarColumn(compact, Modifier.width(columnWidth).fillMaxHeight())
+                            MapCanvas(Modifier.weight(1f).fillMaxHeight(), endInset = if (navNarrow) NavNarrowInset else 0f)
+                        }
                     }
                     // Kartlar haritanın üstünde açılır; klima geniş olduğu için araç sütununu da örter.
-                    PanelHost(panel, navNarrow, columnWidth, climate, onNavigate, onClose = ::closePanel)
+                    PanelHost(panel, navNarrow, columnWidth, mapTop, climate, onNavigate, onClose = ::closePanel)
                     // Görüşme kartı: açık kartların da üstünde, sağ üstte. Erişilebilirlik katmanı
                     // açıksa (BYD penceresini örtüyorsa) kartı o çizer, burada çizilmez.
                     val call by app.pano.launcher.phone.CallHub.state.collectAsState()
@@ -227,7 +261,7 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
                         shown != null,
                         enter = fadeIn(tween(UfukMotionMs)),
                         exit = fadeOut(tween(UfukMotionMs)),
-                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 24.dp),
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = mapTop + 24.dp, end = 24.dp),
                     ) {
                         var lastCall by remember { mutableStateOf(shown) }
                         if (shown != null) lastCall = shown
@@ -237,7 +271,10 @@ fun UfukApp(screen: Screen, climate: ClimateState, onNavigate: (Screen) -> Unit)
                     // OpenStreetMap atfı açıkta kalır.
                     VolumeHud(volume, Modifier.align(Alignment.BottomEnd).padding(end = 112.dp, bottom = 40.dp))
                 }
-                BottomBar(climate, screen, panel, volume, onNavigate, Modifier.fillMaxWidth().height(BarHeight))
+                BottomBar(
+                    climate, screen, panel, volume, onNavigate,
+                    Modifier.fillMaxWidth().height(if (portrait) PortraitBarHeight else BarHeight),
+                )
             }
         }
     }
@@ -257,17 +294,8 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
     val charge = v.charge?.takeIf { it.isActive && !driving }
 
     Column(modifier.background(c.card).padding(start = 36.dp, end = 32.dp, top = 28.dp, bottom = 20.dp)) {
-        // Vites: hepsi görünür, etkin olan beyaz. Bilinmiyorsa hiçbiri vurgulanmaz (uydurma "P" yok).
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                Gear.entries.forEach { g ->
-                    val on = v.gear == g || (v.gear == null && g == Gear.D && driving)
-                    Text(
-                        g.name, fontSize = 28.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
-                        color = if (on) c.text else c.tertiary,
-                    )
-                }
-            }
+            GearSelector(v.gear, driving)
             Spacer(Modifier.weight(1f))
             // Şarjda yüzde aşağıda büyük yazar; burada yalnızca menzil kalır (bilgi tek yerde).
             BatteryReadout(v.batteryPercent, v.rangeKm, c, showPercent = charge == null)
@@ -276,57 +304,10 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
         // Şarjda (park halinde) hızın yerini şarj görünümü alır; kablo çıkınca/şarj bitince hız geri gelir.
         if (charge != null) {
             ChargingReadout(charge, v.batteryPercent, Modifier.padding(top = 18.dp, bottom = 14.dp))
-        } else
-        // Hız: sütunun en büyük öğesi. Bilinmiyorsa "—".
-        Row(Modifier.fillMaxWidth().padding(top = 18.dp)) {
-            // Hız bilinmiyorsa kısa, soluk bir çizgi (uydurma 0 yok).
-            val speed = v.speedKmh
-            // Pano'nun yönlendirmesi hız sınırını biliyorsa levha; aşılınca hız kırmızı. Bilinmiyorsa levha yok.
-            val limit = navSpeedLimit()
-            val over = limit != null && speed != null && speed > limit
-            Text(
-                speed?.toString() ?: "–", color = when { speed == null -> c.tertiary; over -> Color(0xFFFF453A); else -> c.text }, fontSize = 132.sp,
-                fontWeight = FontWeight.Light, letterSpacing = (-5).sp, lineHeight = 132.sp,
-                modifier = Modifier.alignByBaseline(),
-            )
-            Text(
-                "km/sa", color = c.secondary, fontSize = 24.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.alignByBaseline().padding(start = 12.dp),
-            )
-            if (limit != null) {
-                Spacer(Modifier.weight(1f))
-                SpeedLimitSign(limit, 92.dp, Modifier.align(Alignment.CenterVertically))
-            }
+        } else {
+            SpeedReadout(v.speedKmh, Modifier.padding(top = 18.dp))
         }
-
-        // Önizleme yalnızca burada, bir kez.
-        if (v.isPreview) {
-            Text(
-                "Önizleme · araç bağlı değil", color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(c.raised).padding(horizontal = 14.dp, vertical = 8.dp),
-            )
-        }
-        // Sürüş modu, rejen, tüketim: yalnızca araçtan okununca.
-        val chips = listOfNotNull(
-            v.driveMode?.label,
-            v.regen?.let { "Rejen ${it.label}" },
-            v.consumption?.takeIf { !v.isPreview }?.let { "${decimal(it.kwh100)} kWh/100 km" },
-        )
-        if (chips.isNotEmpty()) {
-            // Dar sütunda (sürüş) üçü tek satıra sığmıyor, tüketim kesiliyordu; sığmayan alt satıra iner.
-            androidx.compose.foundation.layout.FlowRow(
-                Modifier.padding(top = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                chips.forEach { label ->
-                    Text(
-                        label, color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
-                        modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(c.raised).padding(horizontal = 14.dp, vertical = 8.dp),
-                    )
-                }
-            }
-        }
+        VehicleChips(v)
 
         // Araç görseli ve hemen altında, ona ortalı açıklık durumu (görselin alt yazısı gibi).
         // Durum satırının yüksekliği sabit: uyarı gelip gidince görsel kıpırdamaz.
@@ -339,6 +320,119 @@ private fun CarColumn(compact: Boolean, modifier: Modifier) {
         Spacer(Modifier.height(12.dp))
         // Müzik yalnızca bir şey çalıyorsa yer kaplar.
         NowPlayingStrip(compact)
+    }
+}
+
+/**
+ * Dikey ekranda araç sütununun yerini alan üst başlık. Bilgi aynı, yalnızca yan yana dizilir:
+ * solda vites, hız (şarjda şarj görünümü) ve çipler; sağda menzil, araç görseli ve açıklıklar;
+ * altta tam genişlik müzik şeridi. Sürüşte ya da yönlendirmede görsel düşer, harita uzar.
+ */
+@Composable
+private fun CarHeader(compact: Boolean, modifier: Modifier) {
+    val c = LocalPano.current
+    val v by VehicleHub.state.collectAsState()
+    val driving by VehicleHub.isDriving.collectAsState()
+    val charge = v.charge?.takeIf { it.isActive && !driving }
+
+    Column(modifier.background(c.card).padding(start = 36.dp, end = 32.dp, top = 24.dp, bottom = 20.dp)) {
+        Row(Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                GearSelector(v.gear, driving)
+                if (charge != null) {
+                    ChargingReadout(charge, v.batteryPercent, Modifier.padding(top = 14.dp, bottom = 10.dp))
+                } else {
+                    SpeedReadout(v.speedKmh, Modifier.padding(top = 14.dp))
+                }
+                VehicleChips(v)
+            }
+            Column(Modifier.padding(start = 24.dp).width(PortraitHeaderSideWidth), horizontalAlignment = Alignment.End) {
+                BatteryReadout(v.batteryPercent, v.rangeKm, c, showPercent = charge == null)
+                AnimatedVisibility(!compact, enter = fadeIn(tween(UfukMotionMs)), exit = fadeOut(tween(UfukMotionMs))) {
+                    CarIllustration(
+                        Modifier.padding(top = 12.dp).fillMaxWidth().height(150.dp),
+                        dark = c.isDark, background = Color.Transparent,
+                    )
+                }
+                // Dar alan: bir etiket ve kalanın sayısı.
+                OpeningsStatus(v.openings, compact = true)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        // Başlık tam genişlikte; müzik şeridi üç düğmesiyle sığar.
+        NowPlayingStrip(compact = false)
+    }
+}
+
+/** Vites: hepsi görünür, etkin olan vurgulu. Bilinmiyorsa hiçbiri vurgulanmaz (uydurma "P" yok). */
+@Composable
+private fun GearSelector(gear: Gear?, driving: Boolean) {
+    val c = LocalPano.current
+    Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        Gear.entries.forEach { g ->
+            val on = gear == g || (gear == null && g == Gear.D && driving)
+            Text(
+                g.name, fontSize = 28.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                color = if (on) c.text else c.tertiary,
+            )
+        }
+    }
+}
+
+/** Hız: sütunun en büyük öğesi. Bilinmiyorsa kısa, soluk bir çizgi (uydurma 0 yok). */
+@Composable
+private fun SpeedReadout(speed: Int?, modifier: Modifier = Modifier) {
+    val c = LocalPano.current
+    Row(modifier.fillMaxWidth()) {
+        // Pano'nun yönlendirmesi hız sınırını biliyorsa levha; aşılınca hız kırmızı. Bilinmiyorsa levha yok.
+        val limit = navSpeedLimit()
+        val over = limit != null && speed != null && speed > limit
+        Text(
+            speed?.toString() ?: "–", color = when { speed == null -> c.tertiary; over -> Color(0xFFFF453A); else -> c.text }, fontSize = 132.sp,
+            fontWeight = FontWeight.Light, letterSpacing = (-5).sp, lineHeight = 132.sp,
+            modifier = Modifier.alignByBaseline(),
+        )
+        Text(
+            "km/sa", color = c.secondary, fontSize = 24.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.alignByBaseline().padding(start = 12.dp),
+        )
+        if (limit != null) {
+            Spacer(Modifier.weight(1f))
+            SpeedLimitSign(limit, 92.dp, Modifier.align(Alignment.CenterVertically))
+        }
+    }
+}
+
+/** "Önizleme" etiketi (yalnızca burada, bir kez) ve araçtan okunan sürüş modu, rejen, tüketim. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun VehicleChips(v: VehicleState) {
+    val c = LocalPano.current
+    if (v.isPreview) {
+        Text(
+            "Önizleme · araç bağlı değil", color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(c.raised).padding(horizontal = 14.dp, vertical = 8.dp),
+        )
+    }
+    val chips = listOfNotNull(
+        v.driveMode?.label,
+        v.regen?.let { "Rejen ${it.label}" },
+        v.consumption?.takeIf { !v.isPreview }?.let { "${decimal(it.kwh100)} kWh/100 km" },
+    )
+    if (chips.isNotEmpty()) {
+        // Dar sütunda (sürüş) üçü tek satıra sığmıyor, tüketim kesiliyordu; sığmayan alt satıra iner.
+        androidx.compose.foundation.layout.FlowRow(
+            Modifier.padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            chips.forEach { label ->
+                Text(
+                    label, color = c.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(c.raised).padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+        }
     }
 }
 
@@ -556,8 +650,9 @@ private fun NowPlayingStrip(compact: Boolean) {
 // ───────────────────────── Harita tuvali ─────────────────────────
 
 @Composable
-private fun MapCanvas(modifier: Modifier, endInset: Float) {
+private fun MapCanvas(modifier: Modifier, endInset: Float, bottomInset: Float = 0f) {
     val c = LocalPano.current
+    val portrait = LocalPortrait.current
     val context = LocalContext.current
     val granted = remember { hasLocationPermission(context) }
     LaunchedEffect(Unit) { PanoNav.init(context) }
@@ -566,7 +661,7 @@ private fun MapCanvas(modifier: Modifier, endInset: Float) {
     val external by NavHub.state.collectAsState()
 
     Box(modifier.background(if (c.isDark) Color(0xFF16181C) else Color(0xFFE8E8ED))) {
-        LiveMap(Modifier.fillMaxSize(), dark = c.isDark, showLocation = granted, bottomInset = 0f, endInset = endInset, interactive = true)
+        LiveMap(Modifier.fillMaxSize(), dark = c.isDark, showLocation = granted, bottomInset = bottomInset, endInset = endInset, interactive = true)
         val controls = rememberMapControls()
         // Yönlendirmede hıza göre yakınlık: şehir içinde yakın, otoyolda daha geniş görüş.
         val speed = VehicleHub.state.collectAsState().value.speedKmh
@@ -586,8 +681,13 @@ private fun MapCanvas(modifier: Modifier, endInset: Float) {
             }
         }
 
-        // Üst sol: arama ya da sıradaki manevra.
-        val top = Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 24.dp).width(560.dp)
+        // Üst sol: arama ya da sıradaki manevra. Dikeyde saatin soluna kadar uzanır (sabit 560 birim
+        // 900'lük ende saatle çakışıyordu); UfukBannerArea.end saat kapsülü + iki yanındaki boşluk.
+        val top = if (portrait) {
+            Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 24.dp, end = UfukBannerArea.end).fillMaxWidth()
+        } else {
+            Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 24.dp).width(560.dp)
+        }
         val step = external
         when {
             session != null -> {
@@ -665,7 +765,10 @@ private fun ClockWeather(modifier: Modifier) {
         weather?.let { w ->
             Box(Modifier.padding(horizontal = 16.dp).width(1.dp).height(28.dp).background(c.hairline))
             Text("${Math.round(w.temperatureC)}°", color = c.text, fontSize = 26.sp, fontWeight = FontWeight.Medium)
-            Text(w.description, color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(start = 10.dp))
+            // Dikeyde açıklama düşer: arama kutusuna yer kalsın.
+            if (!LocalPortrait.current) {
+                Text(w.description, color = c.secondary, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.padding(start = 10.dp))
+            }
         }
         // Kutunun açılabildiğini belli eden küçük ok.
         Icon(PanoIcons.ChevronDown, contentDescription = null, tint = c.tertiary, modifier = Modifier.padding(start = 12.dp).size(20.dp))
@@ -766,8 +869,12 @@ private fun MapButtons(controls: MapControls, modifier: Modifier) {
 // ───────────────────────── Harita üstü kart ─────────────────────────
 
 @Composable
-private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, columnWidth: Dp, climate: ClimateState, onNavigate: (Screen) -> Unit, onClose: () -> Unit) {
+private fun BoxScope.PanelHost(
+    panel: UfukPanel?, navNarrow: Boolean, columnWidth: Dp, mapTop: Dp, climate: ClimateState,
+    onNavigate: (Screen) -> Unit, onClose: () -> Unit,
+) {
     val c = LocalPano.current
+    val portrait = LocalPortrait.current
     var shown by remember { mutableStateOf<UfukPanel?>(null) }
     if (panel != null) shown = panel
     AnimatedVisibility(
@@ -784,15 +891,26 @@ private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, columnWidt
         val dragScope = androidx.compose.runtime.rememberCoroutineScope()
         val closeAt = with(androidx.compose.ui.platform.LocalDensity.current) { 140.dp.toPx() }
         androidx.compose.runtime.LaunchedEffect(panel) { if (panel != null) drag.snapTo(0f) }
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Dikeyde kart başlığın altından başlar (klima başlığı da örter); rota önizlemesinde haritanın
+        // alt kısmına iner, rota üstte görünür (harita aynı oranda bottomInset alıyor).
+        val portraitTop = when {
+            p == UfukPanel.Climate -> 0.dp
+            navNarrow -> mapTop + (maxHeight - mapTop) * (1f - NavNarrowInset)
+            else -> mapTop
+        }
         Box(
             // Sürükleme yalnızca kartın kendi alanında: soldaki sütun (müzik şeridi) dokunulabilir kalsın.
             Modifier.fillMaxSize()
-                .padding(
-                    start = when {
-                        p == UfukPanel.Climate -> 0.dp
-                        navNarrow -> columnWidth + (1600.dp - columnWidth) * (1f - NavNarrowInset)
-                        else -> columnWidth
-                    },
+                .then(
+                    if (portrait) Modifier.padding(top = portraitTop)
+                    else Modifier.padding(
+                        start = when {
+                            p == UfukPanel.Climate -> 0.dp
+                            navNarrow -> columnWidth + (1600.dp - columnWidth) * (1f - NavNarrowInset)
+                            else -> columnWidth
+                        },
+                    ),
                 )
                 .padding(16.dp)
                 .graphicsLayer {
@@ -839,6 +957,7 @@ private fun BoxScope.PanelHost(panel: UfukPanel?, navNarrow: Boolean, columnWidt
                     }
                 }
             }
+        }
         }
     }
 }
@@ -893,21 +1012,28 @@ private fun BottomBar(
     val openClimate = { toggle(Screen.Climate) }
     val edge = c.hairline
     val byd = remember { Launch.hasCarSettings(context) }
+    val background = modifier.background(c.background).drawBehind {
+        drawRect(edge, size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx()))
+    }
 
-    Row(
-        modifier.background(c.background).drawBehind {
-            drawRect(edge, size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx()))
-        }
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    val driverTemp: @Composable () -> Unit = {
         BarTemp(
             "Sürücü", climate.driver, climate.step, climate.isOff,
             onDown = { climate.changeDriver(-0.5f) }, onUp = { climate.changeDriver(0.5f) },
             onOpen = openClimate,
         )
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
-            BarApp(
+    }
+    val passengerTemp: @Composable () -> Unit = {
+        if (climate.dualZone) {
+            BarTemp(
+                "Yolcu", climate.passenger, climate.step, climate.isOff,
+                onDown = { climate.changePassenger(-0.5f) }, onUp = { climate.changePassenger(0.5f) },
+                onOpen = openClimate,
+            )
+        }
+    }
+    val apps: @Composable () -> Unit = {
+        BarApp(
                 PanoIcons.Music, if (playing?.isPlaying == true) "Müzik, çalıyor" else "Müzik",
                 active = panel == UfukPanel.Music, playing = playing?.isPlaying == true,
             ) {
@@ -929,14 +1055,34 @@ private fun BottomBar(
                 BarApp(PanoIcons.Car, "Araç ayarları") { Launch.carSettings(context) }
                 BarApp(PanoIcons.Rotate, "Ekranı döndür") { app.pano.launcher.system.SystemActions.rotate(context) }
             }
+    }
+
+    if (LocalPortrait.current) {
+        // Dikey: üstte sıcaklıklar ortadaki sesle, altta uygulamalar eşit aralıklı. Düğme boyları yataydakiyle aynı.
+        Column(background.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Row(
+                Modifier.fillMaxWidth().weight(1f),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                driverTemp()
+                VolumeControl(volume)
+                // Tek bölgeli araçta sağ boş kalmasın diye ses sağa yaslanır.
+                if (climate.dualZone) passengerTemp()
+            }
+            Row(
+                Modifier.fillMaxWidth().weight(1f),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) { apps() }
         }
-        if (climate.dualZone) {
-            BarTemp(
-                "Yolcu", climate.passenger, climate.step, climate.isOff,
-                onDown = { climate.changePassenger(-0.5f) }, onUp = { climate.changePassenger(0.5f) },
-                onOpen = openClimate,
-            )
-        }
+        return
+    }
+
+    Row(background.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        driverTemp()
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) { apps() }
+        passengerTemp()
         Box(Modifier.padding(horizontal = 12.dp).width(1.dp).height(48.dp).background(edge))
         VolumeControl(volume)
     }
